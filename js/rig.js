@@ -2,7 +2,7 @@
 // (cut-out puppet animation, like the Flash RPGs), then re-rasterised as crisp pixel art each
 // frame: outlined per body part and shaded with a light from the top left.
 // Facing right: +x is forward, y grows downward, the origin is the point between the feet.
-import { DATA } from "./data.js?v=19";
+import { DATA } from "./data.js?v=20";
 
 export const RW = 80, RH = 72, OX = 40, OY = 66;
 const N = RW * RH;

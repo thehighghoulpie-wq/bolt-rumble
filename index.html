@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=19">
+  <link rel="stylesheet" href="css/style.css?v=20">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -29,13 +29,13 @@
           <button class="mi" data-go="help" data-desc="How battles, parts, cores and arenas work.">HOW TO PLAY</button>
         </nav>
       </div>
-      <div class="gbahelp" id="title-help">Pick a mode. Arrow keys move, Z or click selects.</div>
+      <div class="gbahelp" id="title-help">Pick a mode. Tap it, or use the arrow keys and Z.</div>
       <p class="stats" id="title-stats"></p>
     </section>
 
     <!-- WORKSHOP / TEAM BUILDER -->
     <section id="s-workshop" class="screen">
-      <header class="bar"><button class="back" data-back>←</button><h2 id="ws-title">WORKSHOP</h2><span></span></header>
+      <header class="bar"><button class="back" data-back aria-label="Back">◀</button><h2 id="ws-title">WORKSHOP</h2><span></span></header>
       <p class="hint" id="ws-hint"></p>
       <div class="slots" id="ws-slots"></div>
       <div class="ws-main">
@@ -51,18 +51,20 @@
 
     <!-- ONLINE LOBBY -->
     <section id="s-online" class="screen">
-      <header class="bar"><button class="back" data-back>←</button><h2>VS FRIEND ONLINE</h2><span></span></header>
+      <header class="bar"><button class="back" data-back aria-label="Back">◀</button><h2>VS FRIEND ONLINE</h2><span></span></header>
       <div class="lobby">
         <div class="card">
           <h3>HOST A ROOM</h3>
           <p>Get a code and send it to your friend.</p>
           <button class="big" id="on-host">CREATE ROOM</button>
           <div id="on-code" class="code"></div>
+          <button class="big alt hidden" id="on-copy">COPY CODE</button>
+          <button class="big alt hidden" id="on-cancel">CANCEL</button>
         </div>
         <div class="card">
           <h3>JOIN A ROOM</h3>
           <p>Type the code your friend sent you.</p>
-          <input id="on-input" maxlength="5" placeholder="ABCDE" autocomplete="off" aria-label="Room code">
+          <input id="on-input" maxlength="5" placeholder="ABCDE" autocomplete="off" autocapitalize="characters" enterkeyhint="go" aria-label="Room code">
           <button class="big" id="on-join">JOIN</button>
         </div>
       </div>
@@ -139,7 +141,7 @@
 
     <!-- HELP -->
     <section id="s-help" class="screen">
-      <header class="bar"><button class="back" data-back>←</button><h2>HOW TO PLAY</h2><span></span></header>
+      <header class="bar"><button class="back" data-back aria-label="Back">◀</button><h2>HOW TO PLAY</h2><span></span></header>
       <div class="help">
         <p><b>YOUR TEAM</b> is three robots. The ★ one in the middle is your <b>leader</b>. If its head breaks, you lose.</p>
         <p><b>EVERY ROBOT HAS FOUR PARTS:</b> head, right arm, left arm and legs, each with its own armor. A broken part can't be used. Broken legs make a robot slow and easy to hit. Break the head and the robot is out.</p>
@@ -160,6 +162,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-  <script type="module" src="js/ui.js?v=19"></script>
+  <script type="module" src="js/ui.js?v=20"></script>
 </body>
 </html>

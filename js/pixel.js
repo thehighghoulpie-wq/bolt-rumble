@@ -1,6 +1,6 @@
 // 8-bit sprite kit: menu pictures of the jointed robots (see rig.js), Scale2x and the 3x5 pixel font.
-import { drawRobot, RW, OX, OY } from "./rig.js?v=19";
-export { headStyleOf } from "./rig.js?v=19";
+import { drawRobot, RW, OX, OY } from "./rig.js?v=20";
+export { headStyleOf } from "./rig.js?v=20";
 
 // ---------------------------------------------------------------- robots standing still
 const cache = new Map();

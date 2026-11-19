@@ -303,3 +303,19 @@ button:focus-visible { background: var(--win2); outline: 2px solid var(--hot); o
   .cmdinfo { min-height: 0; }
   .mi { font-size: 9px; padding: 8px 8px 8px 26px; }
 }
+
+/* ---------------------------------------------------------------- UX pass (UX review, 2026-11-19) */
+#title-cv { width: min(100%, 720px); aspect-ratio: 240 / 78; image-rendering: pixelated; display: block; margin: 0 auto; }
+/* pixel text below 8px turns to mush: lift the smallest labels */
+.sub, .colcard small, .buyrow small, .hb, .ib, .opt small { font-size: 8px; }
+.chip.core s { color: #a8c4b0; }
+.lcd-row span { opacity: .55; }
+.mi small { font-size: 8px; opacity: .85; margin-left: 4px; }
+/* phones: 44px touch targets, larger body text, no keyboard hints */
+@media (max-width: 640px) {
+  body { font-size: 10px; }
+  .mi, .buyrow button, .speed { min-height: 44px; }
+  .back { width: 44px; height: 44px; }
+}
+@media (hover: none) { .keys { display: none; } }
+#mute { min-height: 36px; }

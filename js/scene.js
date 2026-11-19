@@ -1,8 +1,8 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { drawText, textWidth } from "./pixel.js?v=19";
-import { drawRobot, pieceOf, weaponOf, THRUST, RW, RH, OX, OY } from "./rig.js?v=19";
-import { PARTS } from "./engine.js?v=19";
-import { sfx } from "./sfx.js?v=19";
+import { drawText, textWidth } from "./pixel.js?v=20";
+import { drawRobot, pieceOf, weaponOf, THRUST, RW, RH, OX, OY } from "./rig.js?v=20";
+import { PARTS } from "./engine.js?v=20";
+import { sfx } from "./sfx.js?v=20";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)

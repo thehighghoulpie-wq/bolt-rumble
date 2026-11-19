@@ -1,10 +1,11 @@
-import { DATA } from "./data.js?v=19";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=19";
-import { spriteImg, spriteURL } from "./pixel.js?v=19";
-import { Scene, W, H, hexField } from "./scene.js?v=19";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=19";
-import { Link, makeCode } from "./net.js?v=19";
-import { sfx } from "./sfx.js?v=19";
+import { DATA } from "./data.js?v=20";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=20";
+import { spriteImg, spriteURL } from "./pixel.js?v=20";
+import { drawRobot, RW, RH, OX, OY } from "./rig.js?v=20";
+import { Scene, W, H, hexField } from "./scene.js?v=20";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=20";
+import { Link, makeCode } from "./net.js?v=20";
+import { sfx } from "./sfx.js?v=20";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -34,6 +35,7 @@ function show(id, back = "title") {
   document.querySelectorAll(".screen").forEach((s) => s.classList.toggle("active", s.id === "s-" + id));
   backTo = back;
   window.scrollTo(0, 0);
+  if (id !== "battle" && id !== "result") sfx.music("title");
 }
 document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => {
   if (backTo === "title") { leaveOnline(); renderTitle(); }
@@ -52,9 +54,53 @@ function go(where) {
   if (where === "watch") { renderWatch(); return show("watch"); }
 }
 
+// title hook: the team walks in, breathes, and hops in turn (drawn with the battle rig)
+const touch = matchMedia("(hover: none)").matches;
+let titleRun = 0;
+function titleShow() {
+  const box = $("#title-bots");
+  box.innerHTML = `<canvas id="title-cv" width="240" height="78" aria-label="Your team"></canvas>`;
+  const cv2 = $("#title-cv"), g = cv2.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  const run = ++titleRun, team = profile.team.slice(0, 3);
+  const spots = [120, 66, 174], from = [120, -40, 280];
+  const bots = team.map((b, i) => ({ b, x: i === 0 ? 120 : from[i], dist: 0, y: i === 0 ? -90 : 0, vy: 0, cv: document.createElement("canvas") }));
+  bots.forEach((o) => { o.cv.width = RW; o.cv.height = RH; });
+  let t = 0;
+  const frame = () => {
+    if (run !== titleRun || !$("#s-title.active")) return;
+    t++;
+    g.clearRect(0, 0, 240, 78);
+    bots.forEach((o, i) => {
+      const dx = Math.max(-1.2, Math.min(1.2, spots[i] - o.x));
+      if (t > 10 + i * 12) { o.x += dx; o.dist += Math.abs(dx); }
+      if (o.y < 0 || o.vy) { o.vy += 0.5; o.y = Math.min(0, o.y + o.vy); if (o.y === 0) o.vy = 0; }
+      const hopT = (t + i * 70) % 210;
+      const hop = hopT < 16 ? -7 * Math.sin((Math.PI * hopT) / 16) : 0;
+      const arms = hopT < 16 ? { rs: -2.2, ls: -2.0, re: -0.3, le: -0.3 } : {};
+      const moving = Math.abs(dx) > 0.05 && t > 10 + i * 12;
+      const P = { t: t + i * 40, walk: o.dist / 20, move: moving ? 1 : 0, y: o.y + hop, lean: moving ? 0.07 : 0, drop: moving ? 0 : 0.5 + 0.5 * Math.sin(t * 0.075 + i), ...arms };
+      drawRobot(o.b, P, { canvas: o.cv });
+      const face = i === 2 ? -1 : 1, X = Math.round(o.x), top = 76 - OY;
+      g.fillStyle = "rgba(0,0,0,.3)"; g.fillRect(X - 11, 74, 22, 2);
+      if (face > 0) g.drawImage(o.cv, X - OX, top);
+      else { g.save(); g.translate(X + OX, top); g.scale(-1, 1); g.drawImage(o.cv, 0, 0); g.restore(); }
+    });
+    next();
+  };
+  // next frame: requestAnimationFrame, with a timer fallback for when it is paused
+  const next = () => { let done = false; const go = () => { if (!done) { done = true; frame(); } }; requestAnimationFrame(go); setTimeout(go, 60); };
+  next();
+}
+
 function renderTitle() {
   $("#tagline").textContent = DATA.tagline;
-  $("#title-bots").innerHTML = profile.team.map((b, i) => spriteImg(b, 4, { flip: i === 2 })).join("");
+  titleShow();
+  const fresh = profile.wins === 0 && profile.best === 0;
+  const arc = document.querySelector('[data-go="arcade"]');
+  arc.textContent = fresh ? "ARCADE LADDER ★ START HERE" : "ARCADE LADDER";
+  arc.classList.toggle("special", fresh);
+  $("#title-help").textContent = fresh ? "New here? Pick ARCADE LADDER. Your 3 robots are ready to fight!" : touch ? "Tap a mode." : "Pick a mode. Arrow keys move, Z selects.";
   $("#title-stats").textContent = `ROBOTS ${profile.unlocked.length}/${DATA.robots.length} · BEST ROUND ${profile.best}/${LADDER_LENGTH}` + (profile.clears ? ` · CLEARED ${profile.clears}x` : "");
 }
 
@@ -70,11 +116,11 @@ function openWorkshop(opts) {
 
 function partLine(r, p) {
   const x = r[p];
-  if (p === "legs") return `ARM ${x.armor} · SPD ${x.speed} · EVA ${x.evasion}`;
-  const bits = [`ARM ${x.armor}`];
-  if (x.power) bits.push(`PWR ${x.power}`);
-  if (x.accuracy) bits.push(`ACC ${x.accuracy}`);
-  if (x.uses) bits.push(`USE ${x.uses}`);
+  if (p === "legs") return `HP ${x.armor} · SPEED ${x.speed} · DODGE ${x.evasion}`;
+  const bits = [`HP ${x.armor}`];
+  if (x.power) bits.push(`POWER ${x.power}`);
+  if (x.accuracy) bits.push(`AIM ${x.accuracy}`);
+  if (x.uses) bits.push(`USES ${x.uses}`);
   return bits.join(" · ");
 }
 
@@ -144,6 +190,7 @@ function startBattle({ mode, teams, seed, me = 0, title, level = 3, arcade = nul
   const state = createBattle({ teams, data: DATA, seed: seed ?? ((Math.random() * 1e9) | 0), rule, field });
   const human = mode === "local" ? [0, 1] : [me];
   const ai = mode === "arcade" ? [1] : [];
+  sfx.music(arcade && ladderRound(arcade.k).boss ? "boss" : "battle");
   B = { mode, me, title, level, arcade, state, human, ai, remoteQ: [], cmdFor: null, target: null, speed: 1, ended: false, frame: 0, hashes: {}, teams };
   scene = new Scene(cv, { me });
   scene.setState(state);
@@ -219,6 +266,9 @@ function openCmd([s, i]) {
   scene.actor = [s, i];
   scene.cursor = null;
   renderCmd();
+  const tip = B.mode === "arcade" && profile.wins === 0 ? " TIP: A SHOT IS A SAFE FIRST MOVE." : "";
+  setMsg(`<b>${esc(B.state.sides[s].units[i].name)}</b> IS READY! PICK A MOVE ▼${tip}`);
+  $("#b-cmd").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function closeCmd() {
@@ -292,15 +342,15 @@ function renderCmd() {
       infos.push("No usable parts left.");
     } else {
       const q = u.parts[a.part];
-      items.push(`<button class="mi" data-n="${n}">${PART_LABEL[a.part]} ${esc(q.name)}</button>`);
+      items.push(`<button class="mi" data-n="${n}">${KIND_TEXT[a.kind]} <small>${PART_LABEL[a.part]} · ${esc(q.name)}</small></button>`);
       const stats = [KIND_TEXT[a.kind]];
-      if (q.power) stats.push("PWR " + q.power);
+      if (q.power) stats.push("POWER " + q.power);
       if (q.accuracy) stats.push("AIM " + q.accuracy);
       if (a.part === "head") stats.push(q.usesLeft + " USES LEFT");
       infos.push(`<b>${esc(q.name)}</b> <small>(${PART_LABEL[a.part]} ${q.hp}/${q.max})</small><br>${stats.join(" · ")}<br>${KIND_HINT[a.kind] || ""}<br>${subTags(q)}`);
     }
   });
-  frame("· WHAT'S THE MOVE?", items.join(""), infos, `<button id="c-auto">AUTO (${esc((PERSONALITY[u.core.special] || {}).name || "AI")})</button>`);
+  frame("· PICK A MOVE", items.join(""), infos, `<button id="c-auto">AUTO (${esc((PERSONALITY[u.core.special] || {}).name || "AI")})</button>`);
   box.querySelectorAll("[data-n]").forEach((b) => b.onclick = () => {
     const a = acts[+b.dataset.n];
     if (a.targets[0] === null) return issue({ part: a.part, special: a.special, target: null });
@@ -318,6 +368,9 @@ function issue(cmd) {
   const tick = B.state.tick;
   if (!giveCommand(B.state, s, i, cmd)) return;
   if (B.mode === "online") link.send({ t: "cmd", s, i, tick, cmd });
+  const u = B.state.sides[s].units[i];
+  const what = cmd.part === "core" ? (SPECIALS[cmd.special] || {}).name : cmd.part === "transform" ? "TRANSFORM" : u.parts[cmd.part] ? u.parts[cmd.part].name : "WAIT";
+  setMsg(`<b>${esc(u.name)}</b>: ${esc(what || "GO")}! GO!`);
   closeCmd();
 }
 
@@ -400,6 +453,7 @@ $("#b-quit").onclick = () => {
 // ------------------------------------------------------------------ results
 function endBattle() {
   if (!B) return;
+  sfx.music(null);
   const w = B.state.winner;
   const head = $("#r-head"), text = $("#r-text"), acts = $("#r-actions");
   $("#r-bots").innerHTML = "";
@@ -500,8 +554,8 @@ function renderCollection() {
   if (!r) {
     det.innerHTML = `<p class="hint">Pick a robot you've seen to look at its parts and buy the ones you're missing.</p>
       <div class="plate corep">CHIP SHOP · ${CHIP_PRICE} BOLTS EACH</div>` + CHIP_IDS.map((c) => `<div class="buyrow"><span><i class="gemdot ${c}"></i> <b>${esc(CHIPS[c].name)}</b><small>${esc(CHIPS[c].desc)}</small></span>
-      ${P.chips.includes(c) ? "<em>OWNED</em>" : `<button data-chipbuy="${c}" ${P.bolts < CHIP_PRICE ? "disabled" : ""}>BUY ${CHIP_PRICE}</button>`}</div>`).join("");
-    det.querySelectorAll("[data-chipbuy]").forEach((b) => b.onclick = () => { if (buyChip(profile, b.dataset.chipbuy)) { saveProfile(profile); sfx.unlock2(); renderCollection(); } });
+      ${P.chips.includes(c) ? "<em>OWNED</em>" : `<button data-chipbuy="${c}" ${P.bolts < CHIP_PRICE ? "disabled" : ""}>${P.bolts < CHIP_PRICE ? "NEED" : "BUY"} ${CHIP_PRICE}</button>`}</div>`).join("");
+    det.querySelectorAll("[data-chipbuy]").forEach((b) => b.onclick = () => { if (buyChip(profile, b.dataset.chipbuy)) { saveProfile(profile); sfx.unlock2(); renderCollection(); $("#col-hint").textContent = "BOUGHT A CHIP! PUT IT ON A CORE IN THE WORKSHOP."; } });
     return;
   }
   const full = { head: r.id, rarm: r.id, larm: r.id, legs: r.id };
@@ -510,11 +564,11 @@ function renderCollection() {
     ${SLOTS.map((s) => {
       const has = P.parts[s].includes(r.id), price = partPrice(r.id);
       return `<div class="buyrow"><span><b>${PART_LABEL[s]}</b> ${esc(r[s].name)}<small>${partLine(r, s)}</small></span>
-        ${has ? `<em>OWNED</em>` : `<button data-buy="${s}" ${P.bolts < price ? "disabled" : ""}>BUY ${price}</button>`}</div>`;
+        ${has ? `<em>OWNED</em>` : `<button data-buy="${s}" ${P.bolts < price ? "disabled" : ""}>${P.bolts < price ? "NEED" : "BUY"} ${price}</button>`}</div>`;
     }).join("")}`;
   det.querySelectorAll("[data-buy]").forEach((b) => b.onclick = () => {
     if (b.dataset.buy === "chip") return;
-    if (buyPart(profile, b.dataset.buy, r.id)) { saveProfile(profile); sfx.unlock2(); renderCollection(); }
+    if (buyPart(profile, b.dataset.buy, r.id)) { saveProfile(profile); sfx.unlock2(); renderCollection(); $("#col-hint").textContent = "BOUGHT! FIND IT IN THE WORKSHOP."; }
   });
 }
 
@@ -561,7 +615,7 @@ function startArcade(k) {
   const r = ladderRound(k);
   const title = `${k + 1}/${LADDER_LENGTH} ${r.title.toUpperCase()}`;
   markSeen(profile, r.team); saveProfile(profile);
-  showReady({ title, mine: profile.team, foe: r.team, back: "title", field: r.field,
+  showReady({ title, mine: profile.team, foe: r.team, back: "title", field: r.field, leaveWarn: k > 0 ? "Leave this run? Arcade starts again at round 1." : null,
     rule: r.rule,
     onWorkshop: () => openWorkshop({ team: profile.team, pool: profile.parts, levels: true, title: "WORKSHOP", back: "ready",
       hint: "Swap parts, then press DONE to get back to the fight.", onDone: () => { saveProfile(profile); startArcade(k); } }),
@@ -572,9 +626,9 @@ function startArcade(k) {
 let RD = null;
 function showReady(opts) {
   RD = { ...opts, sel: 0 };
-  $("#ready-title").textContent = opts.title + (opts.rule === "all" ? " · KO ALL" : "") + (opts.field && opts.field !== "normal" ? " · " + FIELDS[opts.field].name : "");
+  $("#ready-title").textContent = opts.title + (opts.rule === "all" ? " · BEAT ALL 3" : "") + (opts.field && opts.field !== "normal" ? " · " + FIELDS[opts.field].name : "");
   const stands = (team, flip, mine) => team.map((b, i) => `<button class="stand${i === 0 ? " lead" : ""}" ${mine ? `data-i="${i}"` : "disabled"} aria-label="${esc(b.name)}">
-      ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span><em class="grade g${terrainGrade(opts.field || "normal", byId(b.legs).body)}">${terrainGrade(opts.field || "normal", byId(b.legs).body)}</em></button>`).join("");
+      ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span><em class="grade g${terrainGrade(opts.field || "normal", byId(b.legs).body)}" title="How good these legs are on this ground: A great, D bad">${terrainGrade(opts.field || "normal", byId(b.legs).body)}</em></button>`).join("");
   $("#rd-mine").innerHTML = stands(opts.mine, false, true);
   $("#rd-foe").innerHTML = stands(opts.foe, true, false);
   $("#rd-mine").querySelectorAll("[data-i]").forEach((b) => {
@@ -584,7 +638,10 @@ function showReady(opts) {
   $("#rd-go").onclick = () => opts.onStart();
   $("#rd-ws").onclick = () => opts.onWorkshop();
   $("#rd-ws").classList.toggle("hidden", !opts.onWorkshop);
-  $("#ready-back").onclick = () => { renderTitle(); show(opts.back || "title"); };
+  $("#ready-back").onclick = () => {
+    if (opts.leaveWarn && !confirm(opts.leaveWarn)) return;
+    renderTitle(); show(opts.back || "title");
+  };
   renderPortrait();
   show("ready", opts.back || "title");
   $("#rd-go").focus({ preventScroll: true });
@@ -631,6 +688,7 @@ function resetLobby() {
   $("#on-status").textContent = "";
   $("#on-ready").classList.add("hidden");
   $("#on-host").disabled = false; $("#on-join").disabled = false;
+  $("#on-cancel").classList.add("hidden"); $("#on-copy").classList.add("hidden");
 }
 
 function leaveOnline() { if (link) { link.close(); link = null; } }
@@ -696,7 +754,11 @@ $("#on-host").onclick = () => {
   link.host(code);
   $("#on-code").textContent = code;
   $("#on-host").disabled = true; $("#on-join").disabled = true;
+  $("#on-cancel").classList.remove("hidden"); $("#on-copy").classList.remove("hidden");
 };
+$("#on-cancel").onclick = () => { leaveOnline(); resetLobby(); $("#on-status").textContent = "CANCELLED."; };
+$("#on-copy").onclick = () => { navigator.clipboard?.writeText($("#on-code").textContent).then(() => { $("#on-status").textContent = "CODE COPIED! SEND IT TO YOUR FRIEND."; }); };
+$("#on-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#on-join").click(); });
 $("#on-join").onclick = () => {
   const code = $("#on-input").value.toUpperCase().trim();
   if (code.length !== 5) { $("#on-status").textContent = "CODES ARE 5 LETTERS."; return; }
@@ -705,6 +767,7 @@ $("#on-join").onclick = () => {
   link = new Link(onMessage, onStatus);
   link.join(code);
   $("#on-host").disabled = true; $("#on-join").disabled = true;
+  $("#on-cancel").classList.remove("hidden");
 };
 $("#on-team").onclick = () => openWorkshop({ team: online.team, pool: DATA.robots.map((r) => r.id), title: "ONLINE TEAM", back: "online",
   hint: "Every part is unlocked in versus.", onDone: () => show("online") });
@@ -716,9 +779,11 @@ $("#on-go").onclick = () => {
 };
 
 // ------------------------------------------------------------------ keyboard (Z = A, X = B, arrows)
+const k0 = (k) => ["z", "Z", "Enter", " "].includes(k);
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey) return;
   const cmd = $("#b-cmd");
+  if ($("#s-battle.active") && cmd.classList.contains("hidden") && k0(e.key)) return; // no menu open: don't press ✕ by accident
   const scope = $("#s-battle.active") && !cmd.classList.contains("hidden") ? cmd : document.querySelector(".screen.active");
   if (!scope) return;
   const btns = [...scope.querySelectorAll("button:not(:disabled)")].filter((b) => b.offsetParent);
@@ -732,7 +797,7 @@ document.addEventListener("keydown", (e) => {
   } else if (k === "z" || k === "Z") {
     (btns.includes(document.activeElement) ? document.activeElement : btns[0])?.click();
   } else if (k === "x" || k === "X" || k === "Escape") {
-    scope.querySelector("#c-back, [data-back], #ready-back")?.click();
+    scope.querySelector("#c-back, [data-back], #ready-back, #r-menu")?.click();
   }
 });
 
