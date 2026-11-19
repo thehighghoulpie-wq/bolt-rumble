@@ -1,7 +1,7 @@
 // 8-bit sprite kit: hand-drawn part templates, palettes, composited 32x32 robots.
 // Keys: . clear  o outline  m main  M main dark  l main light  a accent  A accent dark
 //       e eye/glow  w white  g metal  G dark metal
-import { DATA } from "./data.js?v=6";
+import { DATA } from "./data.js?v=8";
 
 const HEADS = {
   dome: [
@@ -356,15 +356,50 @@ export function sprite(build, opts = {}) {
   return c;
 }
 
+// Scale2x (EPX): doubles a pixel sprite and rounds off its diagonal edges.
+export function scale2x(src) {
+  const w = src.width, h = src.height;
+  const sd = src.getContext("2d").getImageData(0, 0, w, h).data;
+  const out = document.createElement("canvas");
+  out.width = w * 2; out.height = h * 2;
+  const og = out.getContext("2d");
+  const od = og.createImageData(w * 2, h * 2);
+  const px = (x, y) => {
+    x = Math.max(0, Math.min(w - 1, x)); y = Math.max(0, Math.min(h - 1, y));
+    const i = (y * w + x) * 4;
+    return (sd[i] << 24 | sd[i + 1] << 16 | sd[i + 2] << 8 | sd[i + 3]) >>> 0;
+  };
+  const put = (x, y, v) => {
+    const i = (y * w * 2 + x) * 4;
+    od.data[i] = v >>> 24; od.data[i + 1] = (v >>> 16) & 255; od.data[i + 2] = (v >>> 8) & 255; od.data[i + 3] = v & 255;
+  };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const P = px(x, y), A = px(x, y - 1), B = px(x + 1, y), C = px(x - 1, y), D = px(x, y + 1);
+    put(2 * x, 2 * y, C === A && C !== D && A !== B ? A : P);
+    put(2 * x + 1, 2 * y, A === B && A !== C && B !== D ? B : P);
+    put(2 * x, 2 * y + 1, D === C && D !== B && C !== A ? C : P);
+    put(2 * x + 1, 2 * y + 1, B === D && B !== A && D !== C ? D : P);
+  }
+  og.putImageData(od, 0, 0);
+  return out;
+}
+
+const urlCache = new Map();
 export function spriteURL(build, scale = 4, opts = {}) {
-  const s = sprite(build, opts);
+  const key = JSON.stringify([build.head, build.rarm, build.larm, build.legs, scale, !!opts.flip, !!opts.smooth, opts.frame || 0]);
+  if (urlCache.has(key)) return urlCache.get(key);
+  let s = sprite(build, opts);
+  let k = scale;
+  if (opts.smooth && scale >= 2) { s = scale2x(s); k = scale / 2; }
   const c = document.createElement("canvas");
   c.width = 32 * scale; c.height = 32 * scale;
   const ctx = c.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   if (opts.flip) { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
-  ctx.drawImage(s, 0, 0, c.width, c.height);
-  return c.toDataURL();
+  ctx.drawImage(s, 0, 0, s.width * k, s.height * k);
+  const url = c.toDataURL();
+  urlCache.set(key, url);
+  return url;
 }
 
 export function spriteImg(build, scale = 4, opts = {}) {

@@ -1,44 +1,79 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=6";
-import { PARTS } from "./engine.js?v=6";
+import { sprite, drawText, textWidth } from "./pixel.js?v=8";
+import { PARTS } from "./engine.js?v=8";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
 const HOME = [24, 216], ACTIVE = [100, 140];
 const rnd = (a, b) => a + Math.random() * (b - a);
 
+// Pixel hex-tile arena: computed per pixel so every edge is crisp.
+export function hexField(w, h, opts = {}) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  const img = g.createImageData(w, h);
+  const HW = 18, HH = 16; // cell spacing
+  const centers = [];
+  for (let row = -1; row * HH * 0.75 < h + HH; row++) for (let col = -1; col * HW < w + HW; col++) centers.push([col * HW + (row & 1 ? HW / 2 : 0), row * HH * 0.75, (row * 7 + col * 3) & 3]);
+  const base = opts.palette || [[88, 168, 72], [96, 176, 80], [80, 156, 66], [92, 172, 76]];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let d1 = 1e9, d2 = 1e9, best = null;
+    for (const cc of centers) {
+      const dx = x - cc[0], dy = (y - cc[1]) * 1.12;
+      if (Math.abs(dx) > 24 || Math.abs(dy) > 24) continue;
+      const d = Math.max(Math.abs(dx) * 0.866 + Math.abs(dy) * 0.5, Math.abs(dy));
+      if (d < d1) { d2 = d1; d1 = d; best = cc; } else if (d < d2) d2 = d;
+    }
+    let col = base[best ? best[2] : 0].slice();
+    const edge = d2 - d1;
+    const shade = 0.82 + 0.28 * (y / h); // darker toward the top
+    if (edge < 1.2) col = [40, 92, 44];
+    else if (edge < 2.4 && best && y < best[1]) col = col.map((v) => v + 26); // top-left bevel highlight
+    else if (edge < 2.4) col = col.map((v) => v - 18);
+    const i = (y * w + x) * 4;
+    img.data[i] = Math.round((col[0] * shade) / 8) * 8;
+    img.data[i + 1] = Math.round((col[1] * shade) / 8) * 8;
+    img.data[i + 2] = Math.round((col[2] * shade) / 8) * 8;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+// round pixel stand that robots wait on
+function drawStand(g, cx, cy) {
+  const rx = 12, ry = 4;
+  for (let y = -ry; y <= ry + 6; y++) for (let x = -rx; x <= rx; x++) {
+    const inTop = (x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1;
+    const inSide = y > 0 && Math.abs(x) <= rx - 1 && y <= ry + 6 && (x * x) / (rx * rx) + ((y - 6) * (y - 6)) / (ry * ry) <= 1;
+    if (!inTop && !inSide) continue;
+    let col;
+    if (inTop) {
+      const rim = (x * x) / ((rx - 1.5) ** 2) + (y * y) / ((ry - 1) ** 2) > 1;
+      col = rim ? "#2c6f7a" : y < 0 ? "#a8e0e0" : "#80c8cc";
+    } else col = Math.abs(x) > rx - 3 ? "#1c4a54" : "#3c8c96";
+    g.fillStyle = col;
+    g.fillRect(cx + x, cy + y, 1, 1);
+  }
+}
+
 function makeBackground() {
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const g = c.getContext("2d");
-  const sky = ["#1b1f4a", "#252a63", "#30387a", "#3e4a92", "#5662a8"];
-  sky.forEach((col, i) => { g.fillStyle = col; g.fillRect(0, i * 9, W, 9); });
-  // dithered band edges
-  for (let i = 1; i < sky.length; i++) { g.fillStyle = sky[i]; for (let x = (i % 2); x < W; x += 2) g.fillRect(x, i * 9 - 1, 1, 1); }
-  // stars
-  g.fillStyle = "#c8d0ff";
-  for (let i = 0; i < 28; i++) g.fillRect((i * 53) % W, (i * 29) % 26, 1, 1);
-  // skyline
-  g.fillStyle = "#151837";
-  let x = 0;
-  let seed = 7;
-  while (x < W) { seed = (seed * 9301 + 49297) % 233280; const w = 10 + (seed % 18), h = 8 + (seed % 22); g.fillRect(x, 46 - h, w, h); x += w + 2; }
-  g.fillStyle = "#ffd96a";
-  for (let i = 0; i < 30; i++) g.fillRect((i * 37 + 5) % W, 30 + (i * 11) % 14, 1, 1);
-  // arena floor
-  g.fillStyle = "#2c3a2e"; g.fillRect(0, 46, W, H - 46);
-  const rows = ["#34463a", "#2f4034", "#3a4e40", "#33463a"];
-  for (let y = 46, i = 0; y < H; i++) { const h = 4 + i * 2; g.fillStyle = rows[i % rows.length]; g.fillRect(0, y, W, h); y += h; }
-  g.fillStyle = "#283629";
-  for (let i = -12; i <= 12; i++) { // perspective lines
-    for (let y = 46; y < H; y += 2) { const t = (y - 46) / (H - 46); g.fillRect(Math.round(120 + i * (6 + t * 18)), y, 1, 1); }
-  }
-  // command lines and active zone
-  g.fillStyle = "#6fa0ff";
-  for (let y = 50; y < H; y += 4) { g.fillRect(HOME[0] - 12, y, 1, 2); g.fillRect(HOME[1] + 12, y, 1, 2); }
-  g.fillStyle = "#ffd23f";
-  for (let y = 48; y < H; y += 3) { g.fillRect(118, y, 1, 2); g.fillRect(121, y, 1, 2); }
-  g.fillStyle = "rgba(255,210,63,.10)"; g.fillRect(100, 46, 40, H - 46);
+  g.drawImage(hexField(W, H), 0, 0);
+  // active zone in the middle: lighter band and a dashed yellow line
+  g.fillStyle = "rgba(255,240,140,.16)"; g.fillRect(100, 0, 40, H);
+  g.fillStyle = "#f8d838";
+  for (let y = 2; y < H; y += 6) g.fillRect(119, y, 2, 3);
+  // stands on both command lines
+  for (const lane of LANE_Y) { drawStand(g, HOME[0], lane + 1); drawStand(g, HOME[1], lane + 1); }
+  // top banner strip
+  g.fillStyle = "rgba(16,40,20,.55)"; g.fillRect(0, 0, W, 9);
+  drawText(g, "COMMAND", 4, 2, "#a8e0e0", "#0c2010");
+  drawText(g, "ACTION", 108, 2, "#f8d838", "#0c2010");
+  drawText(g, "COMMAND", W - 4 - textWidth("COMMAND"), 2, "#a8e0e0", "#0c2010");
   return c;
 }
 

@@ -1,9 +1,9 @@
-import { DATA } from "./data.js?v=6";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=6";
-import { spriteImg, spriteURL } from "./pixel.js?v=6";
-import { Scene, W, H } from "./scene.js?v=6";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=6";
-import { Link, makeCode } from "./net.js?v=6";
+import { DATA } from "./data.js?v=8";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=8";
+import { spriteImg, spriteURL } from "./pixel.js?v=8";
+import { Scene, W, H, hexField } from "./scene.js?v=8";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=8";
+import { Link, makeCode } from "./net.js?v=8";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -220,9 +220,10 @@ function renderCmd() {
       <div class="row2"><button id="c-back">◀ BACK</button></div>`;
     box.querySelectorAll("[data-t]").forEach((b) => {
       b.onclick = () => issue({ part: t.part, target: +b.dataset.t });
-      b.onmouseenter = () => { scene.cursor = [t.side, +b.dataset.t]; };
+      b.onmouseenter = b.onfocus = () => { scene.cursor = [t.side, +b.dataset.t]; };
     });
     scene.cursor = [t.side, t.list[0]];
+    box.querySelector("[data-t]")?.focus({ preventScroll: true });
     $("#c-back").onclick = () => { B.target = null; scene.cursor = null; renderCmd(); };
     return;
   }
@@ -246,6 +247,7 @@ function renderCmd() {
     renderCmd();
   });
   $("#c-auto").onclick = () => issue(aiCommand(clone(B.state), s, i, 3));
+  box.querySelector("[data-n]")?.focus({ preventScroll: true });
 }
 
 function issue(cmd) {
@@ -382,7 +384,45 @@ function endBattle() {
 // ------------------------------------------------------------------ arcade
 function startArcade(k) {
   const r = ladderRound(k);
-  startBattle({ mode: "arcade", teams: [clone(profile.team), r.team], level: r.level, arcade: { k }, title: `${k + 1}/${LADDER_LENGTH} ${r.title.toUpperCase()}` });
+  const title = `${k + 1}/${LADDER_LENGTH} ${r.title.toUpperCase()}`;
+  showReady({ title, mine: profile.team, foe: r.team, back: "title",
+    onWorkshop: () => openWorkshop({ team: profile.team, pool: profile.unlocked, title: "WORKSHOP", back: "ready",
+      hint: "Swap parts, then press DONE to get back to the fight.", onDone: () => { saveProfile(profile); startArcade(k); } }),
+    onStart: () => startBattle({ mode: "arcade", teams: [clone(profile.team), r.team], level: r.level, arcade: { k }, title }) });
+}
+
+// ------------------------------------------------------------------ team ready screen
+let RD = null;
+function showReady(opts) {
+  RD = { ...opts, sel: 0 };
+  $("#ready-title").textContent = opts.title;
+  const stands = (team, flip, mine) => team.map((b, i) => `<button class="stand${i === 0 ? " lead" : ""}" ${mine ? `data-i="${i}"` : "disabled"} aria-label="${esc(b.name)}">
+      ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span></button>`).join("");
+  $("#rd-mine").innerHTML = stands(opts.mine, false, true);
+  $("#rd-foe").innerHTML = stands(opts.foe, true, false);
+  $("#rd-mine").querySelectorAll("[data-i]").forEach((b) => {
+    b.onclick = () => { RD.sel = +b.dataset.i; renderPortrait(); };
+    b.onfocus = () => { RD.sel = +b.dataset.i; renderPortrait(); };
+  });
+  $("#rd-go").onclick = () => opts.onStart();
+  $("#rd-ws").onclick = () => opts.onWorkshop();
+  $("#rd-ws").classList.toggle("hidden", !opts.onWorkshop);
+  $("#ready-back").onclick = () => { renderTitle(); show(opts.back || "title"); };
+  renderPortrait();
+  show("ready", opts.back || "title");
+  $("#rd-go").focus({ preventScroll: true });
+}
+
+function renderPortrait() {
+  const b = RD.mine[RD.sel];
+  const c = coreById(b.core);
+  const parts = PARTS.map((p) => byId(b[p])[p]);
+  $("#rd-big").innerHTML = spriteImg(b, 6, { smooth: true });
+  $("#rd-name").textContent = b.name;
+  $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(c.name)}`;
+  $("#rd-stats").innerHTML = PARTS.map((p, i) => `<div><span>${PART_LABEL[p]}</span><b>${esc(parts[i].name)}</b></div>`).join("") +
+    `<div><span>SPEED</span><b>${parts[3].speed}</b></div>`;
+  $("#rd-mine").querySelectorAll(".stand").forEach((x, i) => x.classList.toggle("on", i === RD.sel));
 }
 
 // ------------------------------------------------------------------ local versus
@@ -392,7 +432,8 @@ function startLocalSetup() {
   local = { teams: [clone(profile.team), clone(profile.team).reverse()] };
   openWorkshop({ team: local.teams[0], pool: all, title: "P1 TEAM", hint: "Every part is unlocked in versus. Player 1, build your team.",
     onDone: () => openWorkshop({ team: local.teams[1], pool: all, title: "P2 TEAM", hint: "Player 2, build your team. P2 fights from the right.",
-      onDone: () => startBattle({ mode: "local", teams: local.teams, title: "P1 VS P2" }) }) });
+      onDone: () => showReady({ title: "P1 VS P2", mine: local.teams[0], foe: local.teams[1], back: "title",
+        onStart: () => startBattle({ mode: "local", teams: local.teams, title: "P1 VS P2" }) }) }) });
 }
 
 // ------------------------------------------------------------------ online versus (lockstep)
@@ -482,7 +523,28 @@ $("#on-go").onclick = () => {
   if (link.isHost) maybeStartOnline();
 };
 
+// ------------------------------------------------------------------ keyboard (Z = A, X = B, arrows)
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const cmd = $("#b-cmd");
+  const scope = $("#s-battle.active") && !cmd.classList.contains("hidden") ? cmd : document.querySelector(".screen.active");
+  if (!scope) return;
+  const btns = [...scope.querySelectorAll("button:not(:disabled)")].filter((b) => b.offsetParent);
+  const k = e.key;
+  if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(k)) {
+    e.preventDefault();
+    let i = btns.indexOf(document.activeElement);
+    i = i < 0 ? 0 : (i + (k === "ArrowDown" || k === "ArrowRight" ? 1 : -1) + btns.length) % btns.length;
+    btns[i]?.focus();
+  } else if (k === "z" || k === "Z") {
+    (btns.includes(document.activeElement) ? document.activeElement : btns[0])?.click();
+  } else if (k === "x" || k === "X" || k === "Escape") {
+    scope.querySelector("#c-back, [data-back], #ready-back")?.click();
+  }
+});
+
 // ------------------------------------------------------------------ boot
+document.body.style.backgroundImage = `url(${(() => { const c = hexField(216, 168, { palette: [[30, 84, 56], [34, 92, 60], [28, 78, 52], [32, 88, 58]] }); return c.toDataURL(); })()})`;
 if (new URLSearchParams(location.search).has("reset")) profile = resetProfile();
 renderTitle();
 window.__bolt = { get B() { return B; }, get profile() { return profile; }, get scene() { return scene; }, DATA,

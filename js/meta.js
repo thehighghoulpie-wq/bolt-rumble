@@ -1,5 +1,5 @@
 // Profile (saved in this browser) and the arcade ladder.
-import { DATA } from "./data.js?v=6";
+import { DATA } from "./data.js?v=8";
 
 const KEY = "boltrumble.profile.v1";
 const STARTERS = ["r01", "r02", "r03", "r04"];

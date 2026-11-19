@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="stylesheet" href="css/style.css?v=8">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -73,8 +73,29 @@
       <header class="bar"><button class="back" id="b-quit" aria-label="Quit">✕</button><h2 id="b-title">RUMBLE</h2><button id="b-speed" class="speed">x1</button></header>
       <div class="stage"><canvas id="cv" width="240" height="160"></canvas></div>
       <div class="msg" id="b-msg" aria-live="polite"></div>
+      <div class="keys"><span><kbd>←→</kbd> CHOOSE</span><span><kbd>Z</kbd> A · OK</span><span><kbd>X</kbd> B · BACK</span></div>
       <div class="cmdwin hidden" id="b-cmd"></div>
       <div class="hud"><div id="hud-me" class="team"></div><div id="hud-foe" class="team"></div></div>
+    </section>
+
+    <!-- TEAM READY -->
+    <section id="s-ready" class="screen">
+      <header class="bar"><button class="back" id="ready-back" aria-label="Back">◀</button><h2 id="ready-title">GET READY</h2><span></span></header>
+      <div class="ready">
+        <div class="portrait">
+          <div id="rd-big"></div>
+          <div class="plate name" id="rd-name"></div>
+          <div class="plate corep" id="rd-core"></div>
+          <div class="rd-stats" id="rd-stats"></div>
+        </div>
+        <div class="field">
+          <div class="formation" id="rd-mine"></div>
+          <div class="vs">VS</div>
+          <div class="formation foe" id="rd-foe"></div>
+        </div>
+      </div>
+      <div class="keys"><span><kbd>←→</kbd> PICK</span><span><kbd>Z</kbd> A · START</span><span><kbd>X</kbd> B · BACK</span></div>
+      <div class="actions"><button class="big" id="rd-go">START ▶</button><button class="big alt" id="rd-ws">WORKSHOP</button></div>
     </section>
 
     <!-- RESULT -->
@@ -110,6 +131,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-  <script type="module" src="js/ui.js?v=6"></script>
+  <script type="module" src="js/ui.js?v=8"></script>
 </body>
 </html>
