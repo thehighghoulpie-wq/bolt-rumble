@@ -2,8 +2,8 @@
 
 An 8-bit robot battler you play in the browser. Snap on parts, charge your core, win the rumble!
 
-- **Arcade Ladder**: 20 rounds in a row. Every win unlocks a new robot.
-- **Workshop**: mix heads, arms, legs and cores from every robot you've unlocked.
+- **Arcade Ladder**: 20 rounds in a row on changing arenas. Every win takes a part from your rival; bosses give whole robots and chips.
+- **Workshop**: mix the heads, arms, legs, cores and chips you own.
 - **Versus on this device**: two players, one screen.
 - **Versus a friend online**: create a room, send the 5-letter code, play from two devices.
 
