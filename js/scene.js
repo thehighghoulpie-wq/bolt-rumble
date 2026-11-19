@@ -1,7 +1,7 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=11";
-import { PARTS } from "./engine.js?v=11";
-import { sfx } from "./sfx.js?v=11";
+import { sprite, drawText, textWidth } from "./pixel.js?v=13";
+import { PARTS } from "./engine.js?v=13";
+import { sfx } from "./sfx.js?v=13";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -141,7 +141,8 @@ export class Scene {
         const src = U(e.src), dst = U(e.dst);
         const impact = () => this.impact(dst, e);
         if (delay === 0) ({ strike: () => sfx.strike(), beam: () => sfx.beam(), burst: () => sfx.beam(), laser: () => sfx.laser(), missile: () => sfx.missile() }[e.kind] || (() => sfx.shoot()))();
-        if (e.kind === "strike") this.lunge(src, dst, impact);
+        if (e.kind === "legcrash") { this.shakeT = Math.max(this.shakeT, 14); setTimeout(impact, 120 + delay * 10); }
+        else if (e.kind === "strike") this.lunge(src, dst, impact);
         else if (e.kind === "beam" || e.kind === "burst") this.beam(src, dst, e.part, e.kind === "burst" ? 22 : 14, impact);
         else if (e.kind === "laser") this.beam(src, dst, "head", 10, impact, true);
         else if (e.kind === "missile") this.missile(src, dst, delay, impact);
@@ -170,6 +171,11 @@ export class Scene {
         const d = U(e.dst);
         this.slowmo = e.leader ? 90 : 50;
         setTimeout(() => { this.explode(d); sfx.explode(); }, 260);
+      } else if (e.t === "status") {
+        const d = U(e.dst);
+        this.fx.push({ kind: "ring", u: d, col: "#9ff0ff", t: 0, dur: 28 });
+        this.text(d, e.what, "#9ff0ff", 4, true);
+        sfx.shield();
       } else if (e.t === "skip") {
         const s = U(e.src);
         this.text(s, "...", "#aab", 0);
@@ -314,6 +320,7 @@ export class Scene {
     g.restore();
     // status: shields, guard, haste trail
     const side = this.state.sides[u.side];
+    if (!u.down && u.st.stop > 0) { g.strokeStyle = "#9ff0ff"; g.strokeRect(x - 13.5, y - 32.5, 27, 32); g.fillStyle = "rgba(159,240,255,.25)"; g.fillRect(x - 13, y - 32, 26, 31); }
     if (!u.down && (u.st.shield > 0 || side.shield > 0) && this.t % 4 < 2) { g.strokeStyle = "#7fd0ff"; g.strokeRect(x - 14.5, y - 33.5, 29, 34); }
     if (!u.down && u.st.guardedBy !== null) { g.fillStyle = "#ffd23f"; g.fillRect(x + (left ? 12 : -14), y - 22, 2, 10); }
     if (!u.down && side.haste > 0 && moving) { g.fillStyle = "rgba(255,255,255,.5)"; for (let i = 0; i < 3; i++) g.fillRect(x + (left ? -16 - i * 4 : 14 + i * 4), y - 20 + i * 6, 3, 1); }

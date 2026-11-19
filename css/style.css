@@ -196,3 +196,8 @@ button:focus-visible { background: var(--win2); outline: 2px solid var(--hot); o
 @media (prefers-reduced-motion: reduce) { .screen.active, .cmdwin:not(.hidden), .result h2, .result img, .stage canvas.punch { animation: none; } }
 
 #mute { position: fixed; right: 12px; bottom: 12px; z-index: 20; padding: 8px 10px; font-size: 8px; }
+.ws-parts h4 small { color: var(--muted); }
+.chip.core em { font-style: normal; color: var(--cool); }
+.chip.core s { color: #6f8f7a; text-decoration: none; }
+.dot.silver { box-shadow: 0 0 0 2px #e8f0f8, 0 0 0 4px var(--shadow); }
+.dot.gold { box-shadow: 0 0 0 2px #f8d838, 0 0 0 4px var(--shadow); }

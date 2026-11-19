@@ -1,4 +1,4 @@
-import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS } from "../js/engine.js";
+import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS, SPECIALS } from "../js/engine.js";
 import { DATA } from "../js/data.js";
 import { ladderRound } from "../js/meta.js";
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -77,6 +77,39 @@ for (const k of [0, 1, 2, 3, 4, 9, 14, 19]) {
 }
 console.log("arcade win rate with a tier-matched team:", curve.join(" "));
 ok(true, "arcade curve printed");
+
+// cores at max level: all three specials get used, nothing breaks
+{
+  const seen = new Set(); let bad = 0, allRuleOk = true;
+  for (let i = 0; i < 400; i++) {
+    const pick = (k) => R[(i * 11 + k * 7) % R.length].id;
+    const mk = (k) => ({ head: pick(k), rarm: pick(k + 1), larm: pick(k + 2), legs: pick(k + 3), core: cores[(i + k) % 6], coreLv: 30 });
+    const rule = i % 2 ? "all" : "leader";
+    const st = createBattle({ teams: [[mk(0), mk(4), mk(8)], [mk(12), mk(16), mk(20)]], data: DATA, seed: 7000 + i, rule });
+    let f = 0;
+    try {
+      while (st.winner === null && f < 60 * 60 * 20) {
+        autoCommands(st, [0, 1]);
+        for (const e of step(st)) if (e.t === "core") seen.add(e.kind);
+        f++;
+      }
+      if (st.winner === null) bad++;
+      if (rule === "all" && st.winner !== "draw" && st.sides[1 - st.winner].units.some((u) => !u.down) && st.tick < 10800) allRuleOk = false;
+    } catch (e) { bad++; if (bad < 3) console.log(e.stack); }
+  }
+  ok(bad === 0, "400 battles with max-level cores, no crashes or stuck battles");
+  ok(seen.size >= 8, `specials used in play: ${[...seen].sort().join(", ")}`);
+  ok(allRuleOk, "KO-ALL rule: a team only loses when every robot is down (or time runs out)");
+}
+// freeze stops enemies from walking
+{
+  const st = createBattle({ teams: [[full("r01"), full("r02"), full("r03")], [full("r04"), full("r05"), full("r06")]], data: DATA, seed: 5 });
+  autoCommands(st, [0, 1]);
+  for (const u of st.sides[1].units) u.st.stop = 100;
+  const before = st.sides[1].units.map((u) => u.pos);
+  for (let i = 0; i < 30; i++) step(st);
+  ok(st.sides[1].units.every((u, i) => u.pos === before[i]), "FREEZE: frozen robots don't move");
+}
 const s = createBattle({ teams, data: DATA, seed: 3 });
 s.sides[1].units[1].down = true;
 ok(actionsFor(s, 0, 0).every((a) => !a.targets.includes(1) || a.ally), "downed robots can't be targeted");

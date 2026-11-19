@@ -1,10 +1,10 @@
-import { DATA } from "./data.js?v=11";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=11";
-import { spriteImg, spriteURL } from "./pixel.js?v=11";
-import { Scene, W, H, hexField } from "./scene.js?v=11";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=11";
-import { Link, makeCode } from "./net.js?v=11";
-import { sfx } from "./sfx.js?v=11";
+import { DATA } from "./data.js?v=13";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV } from "./engine.js?v=13";
+import { spriteImg, spriteURL } from "./pixel.js?v=13";
+import { Scene, W, H, hexField } from "./scene.js?v=13";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot } from "./meta.js?v=13";
+import { Link, makeCode } from "./net.js?v=13";
+import { sfx } from "./sfx.js?v=13";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -40,8 +40,8 @@ document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click"
 
 function go(where) {
   if (where === "arcade") return startArcade(0);
-  if (where === "workshop") return openWorkshop({ team: profile.team, pool: profile.unlocked, title: "WORKSHOP",
-    hint: `Mix parts from the ${profile.unlocked.length} robots you've unlocked. Slot 1 is your leader.`, onDone: () => { saveProfile(profile); renderTitle(); show("title"); } });
+  if (where === "workshop") return openWorkshop({ team: profile.team, pool: profile.parts, title: "WORKSHOP", levels: true,
+    hint: `Mix the parts you've won. Win fights to take parts from your rivals. Slot 1 is your leader.`, onDone: () => { saveProfile(profile); renderTitle(); show("title"); } });
   if (where === "local") return startLocalSetup();
   if (where === "online") { leaveOnline(); resetLobby(); return show("online"); }
   if (where === "help") return show("help");
@@ -82,18 +82,24 @@ function renderWorkshop() {
   const nameIn = $("#ws-name");
   nameIn.value = b.name;
   nameIn.oninput = () => { b.name = nameIn.value.toUpperCase().slice(0, 10) || byId(b.head).name; };
-  const pool = WS.pool.map(byId).filter(Boolean);
+  const poolFor = (p) => (Array.isArray(WS.pool) ? WS.pool : WS.pool[p]).map(byId).filter(Boolean);
+  const lvOf = (c) => (WS.levels ? coreLvOf(profile, c) : MAX_CORE_LV);
   let html = "";
   for (const p of PARTS) {
-    html += `<h4>${PART_LABEL[p]}</h4><div class="chips">` + pool.map((r) => {
+    html += `<h4>${PART_LABEL[p]} <small>${poolFor(p).length}</small></h4><div class="chips">` + poolFor(p).map((r) => {
       const x = r[p];
       const pv = { head: r.id, rarm: r.id, larm: r.id, legs: r.id };
       return `<button class="chip ${b[p] === r.id ? "on" : ""}" data-p="${p}" data-id="${r.id}">
         ${spriteImg(pv, 1)}<span><b>${esc(x.name)}</b><small>${esc(r.name)} · ${p === "legs" ? r.body.toUpperCase() : KIND_TEXT[x.kind]}</small><small>${partLine(r, p)}</small></span></button>`;
     }).join("") + `</div>`;
   }
-  html += `<h4>CORE</h4><div class="chips">` + DATA.cores.map((c) =>
-    `<button class="chip ${b.core === c.id ? "on" : ""}" data-core="${c.id}"><i class="dot" style="background:${c.color}"></i><span><b>${esc(c.name)}</b><small>${esc(c.desc)}</small></span></button>`).join("") + `</div>`;
+  html += `<h4>CORE</h4><div class="chips">` + DATA.cores.map((c) => {
+    const lv = lvOf(c.id);
+    const tierCls = lv >= 16 ? "gold" : lv >= 8 ? "silver" : "bronze";
+    return `<button class="chip core ${b.core === c.id ? "on" : ""}" data-core="${c.id}"><i class="dot ${tierCls}" style="background:${c.color}"></i><span><b>${esc(c.name)} <em>LV ${lv}</em></b>
+      <small>${(CORE_TREE[c.special] || []).map((sp, i) => lv >= TIER_LV[i] ? esc(SPECIALS[sp].name) : `<s>${esc(SPECIALS[sp].name)} LV${TIER_LV[i]}</s>`).join(" · ")}</small>
+      <small class="hint">BOOSTS ${(AFFINITY[c.special] || []).map((k) => KIND_TEXT[k]).join(" + ")}</small></span></button>`;
+  }).join("") + `</div>`;
   $("#ws-parts").innerHTML = html;
   $("#ws-parts").querySelectorAll("[data-p]").forEach((x) => x.onclick = () => {
     const wasDefault = b.name === byId(b.head).name;
@@ -104,7 +110,7 @@ function renderWorkshop() {
   $("#ws-parts").querySelectorAll("[data-core]").forEach((x) => x.onclick = () => { b.core = x.dataset.core; renderWorkshop(); });
   const parts = PARTS.map((p) => byId(b[p])[p]);
   $("#ws-sum").innerHTML = `ARMOR <b>${parts.reduce((a, x) => a + x.armor, 0)}</b> · SPEED <b>${parts[3].speed}</b> · EVADE <b>${parts[3].evasion}</b><br>
-    CORE <b>${esc(coreById(b.core).name)}</b>: ${esc(coreById(b.core).desc)}`;
+    CORE <b>${esc(coreById(b.core).name)} LV ${lvOf(b.core)}</b> · BOOSTS ${(AFFINITY[coreById(b.core).special] || []).map((k) => KIND_TEXT[k]).join(" + ")}`;
   $("#ws-done").onclick = () => WS.onDone();
 }
 
@@ -114,7 +120,7 @@ cv.addEventListener("click", (e) => {
   if (!B || !B.target) return;
   const r = cv.getBoundingClientRect();
   const hit = scene.unitAtPoint((e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
-  if (hit && hit[0] === B.target.side && B.target.list.includes(hit[1])) issue({ part: B.target.part, target: hit[1] });
+  if (hit && hit[0] === B.target.side && B.target.list.includes(hit[1])) issue({ part: B.target.part, special: B.target.special, target: hit[1] });
 });
 cv.addEventListener("mousemove", (e) => {
   if (!B || !B.target) return;
@@ -123,8 +129,8 @@ cv.addEventListener("mousemove", (e) => {
   if (hit && hit[0] === B.target.side && B.target.list.includes(hit[1])) scene.cursor = hit;
 });
 
-function startBattle({ mode, teams, seed, me = 0, title, level = 3, arcade = null }) {
-  const state = createBattle({ teams, data: DATA, seed: seed ?? ((Math.random() * 1e9) | 0) });
+function startBattle({ mode, teams, seed, me = 0, title, level = 3, arcade = null, rule = "leader" }) {
+  const state = createBattle({ teams, data: DATA, seed: seed ?? ((Math.random() * 1e9) | 0), rule });
   const human = mode === "local" ? [0, 1] : [me];
   const ai = mode === "arcade" ? [1] : [];
   B = { mode, me, title, level, arcade, state, human, ai, remoteQ: [], cmdFor: null, target: null, speed: 1, ended: false, frame: 0, hashes: {}, teams };
@@ -222,7 +228,7 @@ function renderCmd() {
       <div class="opts">${t.list.map((x) => `<button class="opt" data-t="${x}">${spriteImg(units[x].build, 1, { flip: t.side !== B.me })}<span><b>${esc(units[x].name)}</b><small>HEAD ${units[x].parts.head.hp}/${units[x].parts.head.max}${x === 0 ? " · LEADER" : ""}</small></span></button>`).join("")}</div>
       <div class="row2"><button id="c-back">◀ BACK</button></div>`;
     box.querySelectorAll("[data-t]").forEach((b) => {
-      b.onclick = () => issue({ part: t.part, target: +b.dataset.t });
+      b.onclick = () => issue({ part: t.part, special: t.special, target: +b.dataset.t });
       b.onmouseenter = b.onfocus = () => { scene.cursor = [t.side, +b.dataset.t]; };
     });
     scene.cursor = [t.side, t.list[0]];
@@ -233,7 +239,7 @@ function renderCmd() {
   const acts = actionsFor(B.state, s, i);
   box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b>${i === 0 ? " ★" : ""} · WHAT'S THE MOVE?</div>
     <div class="opts">${acts.map((a, n) => {
-      if (a.part === "core") return `<button class="opt core" data-n="${n}"><span><b>★ ${esc(u.core.name)}</b><small>${esc(u.core.desc)}</small></span></button>`;
+      if (a.part === "core") return `<button class="opt core" data-n="${n}"><span><b>★ ${esc(SPECIALS[a.special].name)}</b><small>${esc(SPECIALS[a.special].desc)}</small></span></button>`;
       if (a.part === "wait") return `<button class="opt" data-n="${n}"><span><b>WAIT</b><small>no usable parts</small></span></button>`;
       const q = u.parts[a.part];
       const meta = [PART_LABEL[a.part], KIND_TEXT[a.kind]];
@@ -244,9 +250,9 @@ function renderCmd() {
     <div class="row2"><button id="c-auto">AUTO</button></div>`;
   box.querySelectorAll("[data-n]").forEach((b) => b.onclick = () => {
     const a = acts[+b.dataset.n];
-    if (a.targets[0] === null) return issue({ part: a.part, target: null });
-    const label = a.part === "core" ? u.core.name : u.parts[a.part].name;
-    B.target = { part: a.part, side: a.ally ? s : 1 - s, list: a.targets, label };
+    if (a.targets[0] === null) return issue({ part: a.part, special: a.special, target: null });
+    const label = a.part === "core" ? SPECIALS[a.special].name : u.parts[a.part].name;
+    B.target = { part: a.part, special: a.special, side: a.ally ? s : 1 - s, list: a.targets, label };
     renderCmd();
   });
   $("#c-auto").onclick = () => issue(aiCommand(clone(B.state), s, i, 3));
@@ -275,6 +281,7 @@ function describe(e) {
     case "guard": return `${src} GUARDS ${dst}!`;
     case "core": return `${src} UNLEASHES ${esc(e.pname)}!`;
     case "skip": return `${src} CAN'T ACT: ${esc(e.why).toUpperCase()}`;
+    case "status": return `${dst} IS ${esc(e.what)}!`;
     case "win": return B.mode === "local" ? `P${e.winner + 1} WINS!` : e.winner === B.me ? "YOU WIN!" : "YOU LOSE...";
     case "timeup": return "TIME UP! JUDGE'S DECISION...";
     default: return "";
@@ -343,29 +350,34 @@ function endBattle() {
     if (w === 0) {
       profile.best = Math.max(profile.best, k + 1);
       profile.wins++;
-      const fresh = rewardsFor(k).filter((id) => !profile.unlocked.includes(id));
-      const got = fresh.slice(0, k % 5 === 4 || k === LADDER_LENGTH - 1 ? 2 : 1);
-      profile.unlocked.push(...got);
+      const enemy = ladderRound(k);
+      const spoil = takeSpoils(profile, enemy.team, Math.random, rewardsFor(k));
+      const whole = enemy.boss ? takeWholeRobot(profile, rewardsFor(k)) : null;
+      const got = whole ? [whole] : [];
+      const xp = grantCoreXP(profile, profile.team, true, k);
       const last = k === LADDER_LENGTH - 1;
       if (last) profile.clears++;
       saveProfile(profile);
       head.textContent = last ? "CHAMPION!" : "VICTORY!"; head.className = "win";
-      sfx.victory(); if (got.length) setTimeout(() => sfx.unlock2(), 1200);
+      sfx.victory(); if (spoil || got.length || xp.ups.length) setTimeout(() => sfx.unlock2(), 1200);
       text.innerHTML = (last ? "YOU BEAT ALL 20 ROUNDS!" : `ROUND ${k + 1}/${LADDER_LENGTH} CLEARED`) +
-        (got.length ? `<br>NEW ROBOT: <b>${got.map((id) => esc(byId(id).name)).join(", ")}</b><br>ITS PARTS ARE IN YOUR WORKSHOP` : "");
-      $("#r-bots").innerHTML = got.map((id) => spriteImg({ head: id, rarm: id, larm: id, legs: id }, 4)).join("");
+        (spoil ? `<br>SPOILS: <b>${esc(byId(spoil.id)[spoil.slot].name)}</b> (${PART_LABEL[spoil.slot]} OF ${esc(byId(spoil.id).name)})` : "") +
+        (got.length ? `<br>BOSS PRIZE: THE WHOLE <b>${got.map((id) => esc(byId(id).name)).join(", ")}</b>!` : "") +
+        `<br>CORES +${xp.gain} XP` + xp.ups.map((u) => `<br><b>${esc(coreById(u.core).name)} LV ${u.to}!</b>${newSpecials(u)}`).join("");
+      $("#r-bots").innerHTML = (got.length ? got.map((id) => spriteImg({ head: id, rarm: id, larm: id, legs: id }, 4, { smooth: true })) : spoil ? [spriteImg({ head: spoil.id, rarm: spoil.id, larm: spoil.id, legs: spoil.id }, 4, { smooth: true })] : []).join("");
       acts.innerHTML = last ? `<button class="big" id="r-menu">MENU</button>` :
         `<button class="big" id="r-next">NEXT ROUND ▶</button><button class="big alt" id="r-ws">WORKSHOP</button><button class="big alt" id="r-menu">QUIT RUN</button>`;
       if (!last) {
         $("#r-next").onclick = () => startArcade(k + 1);
-        $("#r-ws").onclick = () => openWorkshop({ team: profile.team, pool: profile.unlocked, title: "WORKSHOP", back: "result",
+        $("#r-ws").onclick = () => openWorkshop({ team: profile.team, pool: profile.parts, levels: true, title: "WORKSHOP", back: "result",
           hint: "Swap parts before the next round. Your robots are fully repaired.", onDone: () => { saveProfile(profile); show("result"); } });
       }
     } else {
+      const xp = grantCoreXP(profile, profile.team, false, k);
       saveProfile(profile);
       head.textContent = "DEFEATED"; head.className = "lose";
       sfx.defeat();
-      text.innerHTML = `YOUR RUN ENDED ON ROUND ${k + 1}<br>BEST: ROUND ${profile.best}`;
+      text.innerHTML = `YOUR RUN ENDED ON ROUND ${k + 1}<br>BEST: ROUND ${profile.best}<br>CORES +${xp.gain} XP` + xp.ups.map((u) => `<br><b>${esc(coreById(u.core).name)} LV ${u.to}!</b>${newSpecials(u)}`).join("");
       acts.innerHTML = `<button class="big" id="r-retry">TRY AGAIN</button><button class="big alt" id="r-ws2">WORKSHOP</button><button class="big alt" id="r-menu">MENU</button>`;
       $("#r-retry").onclick = () => startArcade(0);
       $("#r-ws2").onclick = () => go("workshop");
@@ -375,7 +387,7 @@ function endBattle() {
     sfx.victory();
     text.textContent = "GOOD RUMBLE!";
     acts.innerHTML = `<button class="big" id="r-again">REMATCH</button><button class="big alt" id="r-menu">MENU</button>`;
-    $("#r-again").onclick = () => startBattle({ mode: "local", teams: local.teams, title: "P1 VS P2" });
+    $("#r-again").onclick = () => startBattle({ mode: "local", teams: maxed(local.teams), title: "P1 VS P2" });
   } else {
     head.textContent = w === "draw" ? "DRAW" : w === B.me ? "YOU WIN!" : "YOU LOSE";
     if (w === B.me) sfx.victory(); else sfx.defeat();
@@ -388,21 +400,28 @@ function endBattle() {
   show("result");
 }
 
+function newSpecials(u) {
+  const c = coreById(u.core);
+  const fresh = (CORE_TREE[c.special] || []).filter((_, i) => TIER_LV[i] > u.from && TIER_LV[i] <= u.to);
+  return fresh.length ? ` NEW SPECIAL: <b>${fresh.map((x) => esc(SPECIALS[x].name)).join(", ")}</b>` : "";
+}
+
 // ------------------------------------------------------------------ arcade
 function startArcade(k) {
   const r = ladderRound(k);
   const title = `${k + 1}/${LADDER_LENGTH} ${r.title.toUpperCase()}`;
   showReady({ title, mine: profile.team, foe: r.team, back: "title",
-    onWorkshop: () => openWorkshop({ team: profile.team, pool: profile.unlocked, title: "WORKSHOP", back: "ready",
+    rule: r.rule,
+    onWorkshop: () => openWorkshop({ team: profile.team, pool: profile.parts, levels: true, title: "WORKSHOP", back: "ready",
       hint: "Swap parts, then press DONE to get back to the fight.", onDone: () => { saveProfile(profile); startArcade(k); } }),
-    onStart: () => startBattle({ mode: "arcade", teams: [clone(profile.team), r.team], level: r.level, arcade: { k }, title }) });
+    onStart: () => startBattle({ mode: "arcade", teams: [withCoreLevels(profile, clone(profile.team)), r.team], level: r.level, arcade: { k }, title, rule: r.rule }) });
 }
 
 // ------------------------------------------------------------------ team ready screen
 let RD = null;
 function showReady(opts) {
   RD = { ...opts, sel: 0 };
-  $("#ready-title").textContent = opts.title;
+  $("#ready-title").textContent = opts.title + (opts.rule === "all" ? " · KO ALL" : "");
   const stands = (team, flip, mine) => team.map((b, i) => `<button class="stand${i === 0 ? " lead" : ""}" ${mine ? `data-i="${i}"` : "disabled"} aria-label="${esc(b.name)}">
       ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span></button>`).join("");
   $("#rd-mine").innerHTML = stands(opts.mine, false, true);
@@ -426,11 +445,17 @@ function renderPortrait() {
   const parts = PARTS.map((p) => byId(b[p])[p]);
   $("#rd-big").innerHTML = spriteImg(b, 6, { smooth: true });
   $("#rd-name").textContent = b.name;
-  $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(c.name)}`;
+  const lv = RD.versus ? MAX_CORE_LV : coreLvOf(profile, b.core);
+  $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(c.name)} LV ${lv}`;
   $("#rd-stats").innerHTML = PARTS.map((p, i) => `<div><span>${PART_LABEL[p]}</span><b>${esc(parts[i].name)}</b></div>`).join("") +
-    `<div><span>SPEED</span><b>${parts[3].speed}</b></div>`;
+    `<div><span>SPEED</span><b>${parts[3].speed}</b></div>` +
+    `<div><span>SPECIALS</span><b>${(CORE_TREE[c.special] || []).filter((_, i) => lv >= TIER_LV[i]).map((x) => esc(SPECIALS[x].name)).join(", ")}</b></div>` +
+    (RD.rule === "all" ? `<div><span>RULE</span><b>KNOCK OUT ALL 3</b></div>` : "");
   $("#rd-mine").querySelectorAll(".stand").forEach((x, i) => x.classList.toggle("on", i === RD.sel));
 }
+
+// versus: every core at max level so it's fair
+const maxed = (teams) => teams.map((t) => t.map((b) => ({ ...b, coreLv: MAX_CORE_LV })));
 
 // ------------------------------------------------------------------ local versus
 let local = null;
@@ -439,8 +464,8 @@ function startLocalSetup() {
   local = { teams: [clone(profile.team), clone(profile.team).reverse()] };
   openWorkshop({ team: local.teams[0], pool: all, title: "P1 TEAM", hint: "Every part is unlocked in versus. Player 1, build your team.",
     onDone: () => openWorkshop({ team: local.teams[1], pool: all, title: "P2 TEAM", hint: "Player 2, build your team. P2 fights from the right.",
-      onDone: () => showReady({ title: "P1 VS P2", mine: local.teams[0], foe: local.teams[1], back: "title",
-        onStart: () => startBattle({ mode: "local", teams: local.teams, title: "P1 VS P2" }) }) }) });
+      onDone: () => showReady({ title: "P1 VS P2", mine: local.teams[0], foe: local.teams[1], back: "title", versus: true,
+        onStart: () => startBattle({ mode: "local", teams: maxed(local.teams), title: "P1 VS P2" }) }) }) });
 }
 
 // ------------------------------------------------------------------ online versus (lockstep)
@@ -477,11 +502,12 @@ function onMessage(m) {
   if (m.t === "team") { online.peerTeam = validTeam(m.team); if (link.isHost) maybeStartOnline(); }
   else if (m.t === "start" && !link.isHost) {
     const teams = Array.isArray(m.teams) ? m.teams.map(validTeam) : [];
-    if (teams.length === 2 && teams[0] && teams[1] && Number.isInteger(m.seed)) startBattle({ mode: "online", me: 1, teams, seed: m.seed, title: "ONLINE RUMBLE" });
+    if (teams.length === 2 && teams[0] && teams[1] && Number.isInteger(m.seed)) startBattle({ mode: "online", me: 1, teams: maxed(teams), seed: m.seed, title: "ONLINE RUMBLE" });
   } else if (m.t === "cmd" && B && B.mode === "online") {
     const s = m.s === 0 || m.s === 1 ? m.s : -1;
     if (s !== 1 - B.me || ![0, 1, 2].includes(m.i) || !Number.isInteger(m.tick)) return;
     const c = m.cmd && ["head", "rarm", "larm", "core", "wait"].includes(m.cmd.part) ? { part: m.cmd.part, target: [0, 1, 2].includes(m.cmd.target) ? m.cmd.target : null } : null;
+    if (c && c.part === "core" && Object.hasOwn(SPECIALS, m.cmd.special)) c.special = m.cmd.special;
     B.remoteQ.push({ s, i: m.i, tick: m.tick, cmd: c });
   } else if (m.t === "hash" && B && B.mode === "online") {
     const mine = B.hashes[m.tick];
@@ -494,7 +520,7 @@ function maybeStartOnline() {
   const seed = (Math.random() * 1e9) | 0;
   const teams = [online.team, online.peerTeam];
   link.send({ t: "start", seed, teams });
-  startBattle({ mode: "online", me: 0, teams, seed, title: "ONLINE RUMBLE" });
+  startBattle({ mode: "online", me: 0, teams: maxed(teams.map(validTeam)), seed, title: "ONLINE RUMBLE" });
 }
 
 function maybeRematch() {

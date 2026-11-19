@@ -15,6 +15,31 @@ const HOLD = { strike: 58, missile: 72, core: 64, wait: 8, guard: 30 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+// Core specials: every core starts with one and unlocks two more as it levels up.
+export const SPECIALS = {
+  burst: { name: "BURST", desc: "huge shot that never misses", foe: true },
+  salvo: { name: "SALVO", desc: "fire every weapon at one foe", foe: true },
+  legcrash: { name: "LEG CRASH", desc: "smash every enemy's legs", foe: false },
+  shield: { name: "TEAM WALL", desc: "your team takes half damage", foe: false },
+  repair: { name: "MEND ALL", desc: "repair your whole team", foe: false },
+  overclock: { name: "OVERCLOCK", desc: "+50% power for 3 moves", foe: false },
+  focus: { name: "FOCUS", desc: "next 2 moves hit, aimed at heads", foe: false },
+  haste: { name: "HASTE", desc: "your team moves 40% faster", foe: false },
+  stop: { name: "FREEZE", desc: "enemies can't move for 4 s", foe: false },
+  drain: { name: "DRAIN", desc: "hit a foe, repair yourself", foe: true },
+};
+export const CORE_TREE = {
+  burst: ["burst", "salvo", "legcrash"], shield: ["shield", "stop", "repair"], repair: ["repair", "drain", "shield"],
+  overclock: ["overclock", "salvo", "burst"], focus: ["focus", "legcrash", "stop"], haste: ["haste", "stop", "drain"],
+};
+export const TIER_LV = [1, 8, 16];
+export const MAX_CORE_LV = 30;
+// a core works best with some part types (+15% power, repairs +30%)
+export const AFFINITY = { burst: ["shoot", "missile"], shield: ["guard", "shield"], repair: ["repair"], overclock: ["strike"], focus: ["beam", "laser"], haste: ["strike", "shoot"] };
+export const coreLevel = (xp) => Math.min(MAX_CORE_LV, 1 + Math.floor((xp || 0) / 60));
+export const specialsFor = (core, lv) => (CORE_TREE[core.special] || [core.special]).filter((_, i) => lv >= TIER_LV[i]);
+const affine = (u, kind) => (AFFINITY[u.core.special] || []).includes(kind);
+
 function rand(state) {
   state.r = (state.r + 0x6D2B79F5) >>> 0;
   let t = state.r;
@@ -37,17 +62,19 @@ export function makeUnit(build, data, side, idx) {
   }
   const look = byId(build.color || build.head);
   const core = data.cores.find((c) => c.id === build.core) || data.cores[0];
+  const coreLv = clamp(Math.floor(build.coreLv || 1), 1, MAX_CORE_LV);
   return {
+    coreLv, specials: specialsFor(core, coreLv),
     side, idx, name: build.name || look.name, body: byId(build.legs).body, colors: look.colors,
     build: { ...build }, core, meter: 0, parts, down: false,
     pos: 0, phase: "cmd", cmd: null, lastKind: null,
-    st: { shield: 0, overclock: 0, focus: 0, guarding: null, guardedBy: null },
+    st: { shield: 0, overclock: 0, focus: 0, stop: 0, guarding: null, guardedBy: null },
   };
 }
 
-export function createBattle({ teams, data, seed = 1 }) {
+export function createBattle({ teams, data, seed = 1, rule = "leader" }) {
   return {
-    seed, r: seed >>> 0, tick: 0, hold: 0, winner: null,
+    seed, rule: rule === "all" ? "all" : "leader", r: seed >>> 0, tick: 0, hold: 0, winner: null,
     sides: teams.map((t, s) => ({ units: t.map((b, i) => makeUnit(b, data, s, i)), scan: 0, shield: 0, haste: 0 })),
   };
 }
@@ -76,7 +103,7 @@ export function actionsFor(state, side, idx) {
     else if (k === "scan" || k === "missile") out.push({ part: p, kind: k, targets: [null] });
     else out.push({ part: p, kind: k, targets: foes });
   }
-  if (u.meter >= 100) out.push({ part: "core", kind: u.core.special, targets: u.core.special === "burst" ? foes : [null] });
+  if (u.meter >= 100) for (const sp of u.specials) out.push({ part: "core", kind: sp, special: sp, targets: SPECIALS[sp]?.foe ? foes : [null] });
   const ok = out.filter((a) => a.targets.length > 0);
   if (!ok.length) ok.push({ part: "wait", kind: "wait", targets: [null] });
   return ok;
@@ -100,9 +127,10 @@ export function giveCommand(state, side, idx, action) {
   const u = state.sides[side].units[idx];
   if (!u || u.down || u.phase !== "cmd" || u.cmd) return false;
   const legal = actionsFor(state, side, idx);
-  const a = action && legal.find((x) => x.part === action.part);
-  u.cmd = a ? { part: a.part, target: a.targets.includes(action.target) ? action.target : a.targets[0] }
-    : { part: legal[0].part, target: legal[0].targets[0] };
+  const a = action && (legal.find((x) => x.part === action.part && (x.part !== "core" || x.special === action.special)) || legal.find((x) => x.part === action.part));
+  const pick = a || legal[0];
+  u.cmd = { part: pick.part, target: pick.targets.includes(action?.target) ? action.target : pick.targets[0] };
+  if (pick.special) u.cmd.special = pick.special;
   u.phase = "charge";
   if (u.st.guarding !== null) {
     const g = state.sides[side].units[u.st.guarding];
@@ -127,7 +155,7 @@ function evasionOf(state, u) {
   return e;
 }
 
-const velocity = (state, u) => (0.45 + speedOf(state, u) / 110) / 110;
+const velocity = (state, u) => (u.st.stop > 0 ? 0 : (0.45 + speedOf(state, u) / 110) / 110);
 
 // advance one tick; returns the events that happened during it
 export function step(state) {
@@ -140,7 +168,7 @@ export function step(state) {
     if (s.scan > 0) s.scan--;
     if (s.shield > 0) s.shield--;
     if (s.haste > 0) s.haste--;
-    for (const u of s.units) if (u.st.shield > 0) u.st.shield--;
+    for (const u of s.units) { if (u.st.shield > 0) u.st.shield--; if (u.st.stop > 0) u.st.stop--; }
   }
   const arrived = [];
   for (const s of state.sides) for (const u of s.units) {
@@ -182,7 +210,7 @@ function checkWinner(state, log) {
   if (state.winner !== null) return;
   for (let s = 0; s < 2; s++) {
     const side = state.sides[s];
-    if (side.units[0].down || living(side).length === 0) {
+    if ((state.rule !== "all" && side.units[0].down) || living(side).length === 0) {
       state.winner = 1 - s;
       log.push({ t: "win", winner: 1 - s });
       return;
@@ -209,7 +237,7 @@ function perform(state, u, a, log) {
   if (a.part === "head") part.usesLeft--;
   if (k === "repair") {
     const t = pickTarget(state, u.side, a.target);
-    log.push({ t: "repair", ...ref, dst: [t.side, t.idx], amount: heal(t, 28 + Math.round(part.max * 0.2), false) });
+    log.push({ t: "repair", ...ref, dst: [t.side, t.idx], amount: heal(t, Math.round((28 + part.max * 0.2) * (affine(u, "repair") ? 1.3 : 1)), false) });
   } else if (k === "shield") {
     const t = pickTarget(state, u.side, a.target);
     t.st.shield = 360;
@@ -263,6 +291,7 @@ function attack(state, u, part, k, target, log, ref, mult) {
   let dmg = part.power * DMG_SCALE * mult * (0.85 + rand(state) * 0.3);
   if (k === "strike") dmg *= 1.25 * (0.6 + speedOf(state, u) / 150);
   if (u.st.overclock > 0) dmg *= 1.5;
+  if (affine(u, k)) dmg *= 1.15;
   if (crit) dmg *= 1.5;
   if (guarded) dmg *= 0.6;
   if (k !== "beam") {
@@ -307,20 +336,47 @@ function heal(t, amount, all) {
   return q.hp - b;
 }
 
+function bestArm(u) {
+  return ["rarm", "larm", "head"].filter((p) => intact(u, p) && u.parts[p].power > 0).sort((x, y) => u.parts[y].power - u.parts[x].power)[0];
+}
+
 function doCore(state, u, a, log) {
   if (u.meter < 100) { log.push({ t: "skip", src: [u.side, u.idx], why: "core not charged" }); return; }
+  const sp = u.specials.includes(a.special) ? a.special : u.specials[0];
   u.meter = 0;
-  const sp = u.core.special, side = state.sides[u.side];
-  const ref = { src: [u.side, u.idx], part: "core", pname: u.core.name, kind: sp };
+  const side = state.sides[u.side], foeSide = state.sides[1 - u.side];
+  const ref = { src: [u.side, u.idx], part: "core", pname: SPECIALS[sp].name, kind: sp };
   log.push({ t: "core", ...ref });
+  const sure = (fn) => { const saved = u.st.focus; u.st.focus = 1; fn(); u.st.focus = saved; };
   if (sp === "burst") {
-    const arm = ["rarm", "larm", "head"].filter((p) => intact(u, p) && u.parts[p].power > 0).sort((x, y) => u.parts[y].power - u.parts[x].power)[0];
+    const arm = bestArm(u), t = pickTarget(state, 1 - u.side, a.target);
+    if (arm && t) sure(() => attack(state, u, u.parts[arm], "beam", t, log, { ...ref, kind: "burst" }, 2));
+  } else if (sp === "salvo") {
     const t = pickTarget(state, 1 - u.side, a.target);
-    if (arm && t) {
-      const saved = u.st.focus; u.st.focus = 1;
-      attack(state, u, u.parts[arm], "beam", t, log, { ...ref, kind: "burst" }, 2);
-      u.st.focus = saved;
+    for (const p of ["head", "rarm", "larm"]) {
+      if (!t || t.down || state.winner !== null) break;
+      if (!intact(u, p) || !u.parts[p].power) continue;
+      sure(() => attack(state, u, u.parts[p], "beam", t, log, { ...ref, kind: "burst" }, 0.9));
+      checkWinner(state, log);
     }
+  } else if (sp === "drain") {
+    const arm = bestArm(u), t = pickTarget(state, 1 - u.side, a.target);
+    if (arm && t) {
+      const n = log.length;
+      sure(() => attack(state, u, u.parts[arm], "beam", t, log, { ...ref, kind: "burst" }, 1.2));
+      const dealt = log.slice(n).reduce((x, e) => x + (e.t === "attack" && e.hit ? e.dmg : 0), 0);
+      if (dealt) log.push({ t: "repair", ...ref, dst: [u.side, u.idx], amount: heal(u, dealt, false) });
+    }
+  } else if (sp === "legcrash") {
+    for (const t of living(foeSide)) {
+      const q = t.parts.legs;
+      if (q.hp <= 0) continue;
+      const before = q.hp;
+      q.hp = Math.max(0, q.hp - Math.max(1, Math.round(q.max * 0.5)));
+      log.push({ t: "attack", ...ref, kind: "legcrash", dst: [t.side, t.idx], hit: true, crit: false, hitPart: "legs", dmg: before - q.hp, broke: q.hp === 0, guarded: false });
+    }
+  } else if (sp === "stop") {
+    for (const t of living(foeSide)) { t.st.stop = 240; log.push({ t: "status", ...ref, dst: [t.side, t.idx], what: "FROZEN" }); }
   } else if (sp === "shield") side.shield = 420;
   else if (sp === "repair") { for (const x of living(side)) log.push({ t: "repair", ...ref, dst: [x.side, x.idx], amount: heal(x, 0.35, true) }); }
   else if (sp === "overclock") u.st.overclock = 3;
@@ -336,8 +392,14 @@ export function aiCommand(state, side, idx, level = 3) {
   const roll = () => rand(state);
   const acts = actionsFor(state, side, idx);
   const hurt = living(me).filter((x) => PARTS.some((p) => x.parts[p].hp > 0 && x.parts[p].hp < x.parts[p].max * 0.5));
-  const core = acts.find((a) => a.part === "core");
-  if (core && (core.kind !== "repair" || hurt.length)) return { part: "core", target: leaderOr(foe, foes, roll, level) };
+  const cores = acts.filter((a) => a.part === "core");
+  if (cores.length) {
+    const want = hurt.length >= 2 ? cores.find((c) => c.special === "repair") : null;
+    const offense = cores.filter((c) => c.special !== "repair");
+    const strong = offense[Math.floor(roll() * offense.length)];
+    const pick = want || strong || (hurt.length ? cores[0] : null);
+    if (pick) return { part: "core", special: pick.special, target: SPECIALS[pick.special].foe ? leaderOr(foe, foes, roll, level) : null };
+  }
   const rep = acts.find((a) => a.kind === "repair");
   if (rep && hurt.length) return { part: rep.part, target: hurt[0].idx };
   const shd = acts.find((a) => a.kind === "shield");
