@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bolt Rumble</title>
+  <meta name="description" content="Snap on parts. Charge your core. Win the rumble! A turn-based robot battler you can play solo or against a friend online.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=6">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <main id="app">
+    <!-- TITLE -->
+    <section id="s-title" class="screen active">
+      <div class="logo"><span>BOLT</span><span>RUMBLE</span></div>
+      <p class="tagline" id="tagline"></p>
+      <div id="title-bots" class="title-bots"></div>
+      <nav class="menu">
+        <button class="big" data-go="arcade">▶ ARCADE LADDER</button>
+        <button class="big" data-go="online">▶ VS FRIEND ONLINE</button>
+        <button class="big" data-go="local">▶ VS ON THIS DEVICE</button>
+        <button class="big alt" data-go="workshop">WORKSHOP</button>
+        <button class="big alt" data-go="help">HOW TO PLAY</button>
+      </nav>
+      <p class="stats" id="title-stats"></p>
+    </section>
+
+    <!-- WORKSHOP / TEAM BUILDER -->
+    <section id="s-workshop" class="screen">
+      <header class="bar"><button class="back" data-back>←</button><h2 id="ws-title">WORKSHOP</h2><span></span></header>
+      <p class="hint" id="ws-hint"></p>
+      <div class="slots" id="ws-slots"></div>
+      <div class="ws-main">
+        <div class="ws-preview">
+          <div id="ws-bot"></div>
+          <input id="ws-name" maxlength="10" aria-label="Robot name">
+          <div id="ws-sum" class="sum"></div>
+        </div>
+        <div class="ws-parts" id="ws-parts"></div>
+      </div>
+      <div class="actions"><button class="big" id="ws-done">DONE</button></div>
+    </section>
+
+    <!-- ONLINE LOBBY -->
+    <section id="s-online" class="screen">
+      <header class="bar"><button class="back" data-back>←</button><h2>VS FRIEND ONLINE</h2><span></span></header>
+      <div class="lobby">
+        <div class="card">
+          <h3>HOST A ROOM</h3>
+          <p>Get a code and send it to your friend.</p>
+          <button class="big" id="on-host">CREATE ROOM</button>
+          <div id="on-code" class="code"></div>
+        </div>
+        <div class="card">
+          <h3>JOIN A ROOM</h3>
+          <p>Type the code your friend sent you.</p>
+          <input id="on-input" maxlength="5" placeholder="ABCDE" autocomplete="off" aria-label="Room code">
+          <button class="big" id="on-join">JOIN</button>
+        </div>
+      </div>
+      <p class="status" id="on-status"></p>
+      <div id="on-ready" class="hidden">
+        <p class="hint">Connected! Build your team (every part is unlocked in versus), then press Ready.</p>
+        <div class="actions"><button class="big alt" id="on-team">EDIT MY TEAM</button><button class="big" id="on-go">READY</button></div>
+      </div>
+    </section>
+
+    <!-- BATTLE -->
+    <section id="s-battle" class="screen">
+      <header class="bar"><button class="back" id="b-quit" aria-label="Quit">✕</button><h2 id="b-title">RUMBLE</h2><button id="b-speed" class="speed">x1</button></header>
+      <div class="stage"><canvas id="cv" width="240" height="160"></canvas></div>
+      <div class="msg" id="b-msg" aria-live="polite"></div>
+      <div class="cmdwin hidden" id="b-cmd"></div>
+      <div class="hud"><div id="hud-me" class="team"></div><div id="hud-foe" class="team"></div></div>
+    </section>
+
+    <!-- RESULT -->
+    <section id="s-result" class="screen">
+      <div class="result">
+        <h2 id="r-head"></h2>
+        <p id="r-text"></p>
+        <div id="r-bots" class="title-bots"></div>
+        <div class="actions" id="r-actions"></div>
+      </div>
+    </section>
+
+    <!-- HELP -->
+    <section id="s-help" class="screen">
+      <header class="bar"><button class="back" data-back>←</button><h2>HOW TO PLAY</h2><span></span></header>
+      <div class="help">
+        <p><b>YOUR TEAM</b> is three robots. The ★ one in the middle is your <b>leader</b>. If its head breaks, you lose.</p>
+        <p><b>EVERY ROBOT HAS FOUR PARTS:</b> head, right arm, left arm and legs, each with its own armor. A broken part can't be used. Broken legs make a robot slow and easy to hit. Break the head and the robot is out.</p>
+        <p><b>HOW A RUMBLE FLOWS:</b> robots wait on their command line (the blue dashes). Give one an order and it walks to the middle while it charges, does its move, then walks back to cool down. Faster legs walk faster. The fight pauses while you choose.</p>
+        <ul>
+          <li><b>SHOOT</b>: steady. <b>BEAM</b>: slow charge, goes through guards. <b>STRIKE</b>: fast charge, big hit, but you're easier to hit while charging.</li>
+          <li><b>GUARD</b> (left arm): stand in front of an ally and take their hits until your next order.</li>
+          <li><b>LASER, MISSILES, SCAN, SHIELD, REPAIR</b>: head moves with limited uses.</li>
+          <li><b>CORE</b>: fills when you hit or get hit. Full core = a special move.</li>
+        </ul>
+        <p><b>ARCADE:</b> beat 20 rounds in a row. Every win unlocks a robot whose parts you can mix in the Workshop.</p>
+        <p><b>VS FRIEND ONLINE:</b> one player creates a room and sends the 5-letter code, the other joins. Your games stay in sync move by move.</p>
+      </div>
+    </section>
+
+    <!-- HANDOFF (local versus) -->
+    <div id="handoff" class="overlay hidden"><div class="card"><h3 id="ho-text"></h3><button class="big" id="ho-ok">I'M READY</button></div></div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+  <script type="module" src="js/ui.js?v=6"></script>
+</body>
+</html>
