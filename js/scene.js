@@ -1,7 +1,7 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=13";
-import { PARTS } from "./engine.js?v=13";
-import { sfx } from "./sfx.js?v=13";
+import { sprite, drawText, textWidth } from "./pixel.js?v=14";
+import { PARTS } from "./engine.js?v=14";
+import { sfx } from "./sfx.js?v=14";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -59,11 +59,20 @@ function drawStand(g, cx, cy) {
   }
 }
 
-function makeBackground() {
+const FIELD_PALETTE = {
+  storm: [[64, 82, 108], [70, 90, 116], [58, 76, 100], [66, 86, 112]],
+  ice: [[150, 200, 228], [160, 210, 236], [140, 190, 220], [156, 206, 232]],
+  swamp: [[72, 98, 50], [62, 86, 42], [80, 106, 54], [68, 92, 46]],
+  fog: [[118, 138, 126], [126, 146, 134], [112, 130, 120], [122, 142, 130]],
+  junkyard: [[124, 104, 82], [132, 112, 88], [116, 96, 76], [128, 108, 86]],
+  lab: [[82, 74, 142], [90, 82, 152], [74, 66, 130], [86, 78, 148]],
+};
+
+function makeBackground(field = "normal") {
   const c = document.createElement("canvas");
   c.width = W; c.height = H;
   const g = c.getContext("2d");
-  g.drawImage(hexField(W, H), 0, 0);
+  g.drawImage(hexField(W, H, { palette: FIELD_PALETTE[field] }), 0, 0);
   // active zone in the middle: lighter band and a dashed yellow line
   g.fillStyle = "rgba(255,240,140,.16)"; g.fillRect(100, 0, 40, H);
   g.fillStyle = "#f8d838";
@@ -99,7 +108,7 @@ export class Scene {
     this.introT = 0;   // robots drop onto their stands, then RUMBLE! lands
   }
 
-  setState(s) { this.state = s; }
+  setState(s) { this.state = s; if (s && s.field !== this.field) { this.field = s.field; this.bg = makeBackground(s.field); } }
   col(side) { return side === this.view.me ? 0 : 1; }
   homeX(side) { return HOME[this.col(side)]; }
   activeX(side) { return ACTIVE[this.col(side)]; }
@@ -137,6 +146,13 @@ export class Scene {
     const U = (ref) => S.sides[ref[0]].units[ref[1]];
     let delay = 0;
     for (const e of events) {
+      if (e.t === "attack" && !e.src) { this.impact(U(e.dst), e); continue; }
+      if (e.t === "field") {
+        this.flashT = 6; this.shakeT = Math.max(this.shakeT, 8);
+        this.fx.push({ kind: "banner", str: e.what, t: 0, dur: 60 });
+        if (this.field === "lab") sfx.riser(); else sfx.explode();
+        continue;
+      }
       if (e.t === "attack") {
         const src = U(e.src), dst = U(e.dst);
         const impact = () => this.impact(dst, e);
@@ -254,6 +270,7 @@ export class Scene {
     // shadows
     for (const u of units) { const [x, y] = this.unitXY(u); g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(Math.round(x) - 9, y, 18, 2); g.fillRect(Math.round(x) - 7, y + 2, 14, 1); }
     for (const u of units) this.drawUnit(g, u);
+    this.drawWeather(g);
     this.drawFx(g);
     this.drawIntro(g);
     if (this.cursor) this.drawArrow(g, this.cursor, "#ffd23f");
@@ -336,6 +353,31 @@ export class Scene {
       g.fillRect(x - 8, y - 37, Math.max(1, Math.round(16 * hp)), 2);
       if (u.meter >= 100 && this.t % 20 < 10) { g.fillStyle = u.core.color || "#ffd23f"; g.fillRect(x + 10, y - 38, 3, 4); }
       if (u.idx === 0) drawText(g, "L", x - 14, y - 39, "#ffd23f", "#000");
+    }
+  }
+
+  // per-field weather, drawn every frame (presentation only)
+  drawWeather(g) {
+    const f = this.field, t = this.t;
+    if (f === "storm") {
+      g.fillStyle = "rgba(190,210,255,.55)";
+      for (let i = 0; i < 40; i++) { const x = (i * 37 + t * 5) % (W + 40) - 20, y = (i * 53 + t * 9) % H; g.fillRect(x, y, 1, 4); g.fillRect(x - 1, y + 4, 1, 2); }
+      if (t % 240 === 0) this.flashT = 5;
+    } else if (f === "fog") {
+      for (let i = 0; i < 4; i++) { g.fillStyle = `rgba(230,240,235,${0.10 + 0.04 * i})`; g.fillRect(((t * (0.3 + i * 0.15)) % (W + 120)) - 120, 30 + i * 30, 120, 18); }
+    } else if (f === "ice") {
+      g.fillStyle = "#ffffff";
+      for (let i = 0; i < 10; i++) if ((t + i * 13) % 50 < 6) g.fillRect((i * 71) % W, 20 + (i * 37) % (H - 20), 1, 1);
+    } else if (f === "swamp") {
+      g.fillStyle = "rgba(160,200,120,.7)";
+      for (let i = 0; i < 6; i++) { const ph = (t + i * 40) % 90; if (ph < 30) g.fillRect((i * 43 + 20) % W, 150 - ph / 3, ph < 24 ? 2 : 3, ph < 24 ? 2 : 1); }
+    } else if (f === "junkyard") {
+      g.fillStyle = "rgba(200,180,150,.6)";
+      for (let i = 0; i < 14; i++) g.fillRect(((i * 59 + t) % W), (i * 23 + Math.floor(t / 3)) % H, 1, 1);
+    } else if (f === "lab") {
+      const a = 0.08 + 0.06 * Math.sin(t / 20);
+      g.fillStyle = `rgba(150,240,255,${a})`;
+      for (let x = 0; x < W; x += 24) g.fillRect(x, 10, 1, H - 10);
     }
   }
 
@@ -426,6 +468,13 @@ export class Scene {
           g.strokeStyle = f.col; g.lineWidth = 1; g.globalAlpha = 1 - p;
           g.strokeRect(Math.round(cx - r) + 0.5, Math.round(cy - r) + 0.5, Math.round(r * 2), Math.round(r * 2));
           g.globalAlpha = 1;
+          break;
+        }
+        case "banner": {
+          const sc = f.t < 5 ? 3 : 2;
+          const w = textWidth(f.str, sc);
+          g.fillStyle = "rgba(0,0,0,.45)"; g.fillRect(0, 58, W, 22);
+          drawText(g, f.str, Math.round(120 - w / 2), 62, "#f8d838", "#6a2a00", sc);
           break;
         }
         case "ripple": {

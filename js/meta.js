@@ -1,6 +1,6 @@
 // Profile (saved in this browser) and the arcade ladder.
-import { DATA } from "./data.js?v=13";
-import { coreLevel, MAX_CORE_LV } from "./engine.js?v=13";
+import { DATA } from "./data.js?v=14";
+import { coreLevel, MAX_CORE_LV } from "./engine.js?v=14";
 
 const KEY = "boltrumble.profile.v1";
 const STARTERS = ["r01", "r02", "r03", "r04"];
@@ -26,6 +26,8 @@ export function loadProfile() {
   // migrate older saves: per-part collection and core experience
   if (!p.parts) { p.parts = { head: [], rarm: [], larm: [], legs: [] }; for (const id of p.unlocked) givesAll(p, id); }
   if (!p.coreXP) p.coreXP = {};
+  if (typeof p.bolts !== "number") p.bolts = 0;
+  if (!Array.isArray(p.seen)) p.seen = [...p.unlocked];
   return p;
 }
 
@@ -55,6 +57,23 @@ export function grantCoreXP(p, team, won, round) {
 }
 
 export const ownsPart = (p, slot, id) => p.parts[slot].includes(id);
+
+// bolts: earned in every fight, spent in the shop on parts of robots you've seen
+export const partPrice = (id) => 60 * (DATA.robots.find((r) => r.id === id)?.tier || 1);
+export function earnBolts(p, won, round = 0) {
+  const n = won ? 40 + round * 8 : 10 + round * 2;
+  p.bolts += n;
+  return n;
+}
+export function markSeen(p, team) { for (const b of team) for (const s of SLOTS) if (!p.seen.includes(b[s])) p.seen.push(b[s]); }
+export function buyPart(p, slot, id) {
+  const cost = partPrice(id);
+  if (ownsPart(p, slot, id) || !p.seen.includes(id) || p.bolts < cost) return false;
+  p.bolts -= cost;
+  p.parts[slot].push(id);
+  if (SLOTS.every((s) => ownsPart(p, s, id)) && !p.unlocked.includes(id)) p.unlocked.push(id);
+  return true;
+}
 
 // the loser hands over one random part from its team that you don't own yet
 export function takeSpoils(p, enemyTeam, rnd = Math.random, fallbackIds = []) {
@@ -93,6 +112,9 @@ const PLAN = [
   ["Crossfire", [4, 4, 3], 4, true, "all"], ["Elite Squad", [4, 4, 4], 4], ["No Mercy", [5, 4, 4], 5, true],
   ["Last Gate", [5, 4, 4], 5, false, "all"], ["FINAL: Omega Rumble", [5, 5, 5], 5],
 ];
+// arena field for each round
+const FIELD_PLAN = ["normal", "normal", "lab", "swamp", "storm", "ice", "fog", "junkyard", "lab", "storm",
+  "swamp", "junkyard", "fog", "ice", "storm", "lab", "junkyard", "fog", "ice", "normal"];
 
 export const LADDER_LENGTH = PLAN.length;
 
@@ -113,7 +135,7 @@ export function ladderRound(k) {
     }
     return { ...defaultBuild(r.id, core), scale, coreLv };
   });
-  return { title, team, level, rule, boss: title.startsWith("BOSS") || title.startsWith("FINAL") };
+  return { title, team, level, rule, field: FIELD_PLAN[k] || "normal", boss: title.startsWith("BOSS") || title.startsWith("FINAL") };
 }
 
 // whole robots a boss round can hand over: its own robots first, then anything of that tier or lower

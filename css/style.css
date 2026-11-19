@@ -201,3 +201,27 @@ button:focus-visible { background: var(--win2); outline: 2px solid var(--hot); o
 .chip.core s { color: #6f8f7a; text-decoration: none; }
 .dot.silver { box-shadow: 0 0 0 2px #e8f0f8, 0 0 0 4px var(--shadow); }
 .dot.gold { box-shadow: 0 0 0 2px #f8d838, 0 0 0 4px var(--shadow); }
+
+/* collection & shop */
+.bolts { color: var(--hot); font-size: 9px; text-align: right; }
+.col-wrap { display: grid; grid-template-columns: 1fr 280px; gap: 16px; }
+.col-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; align-content: start; }
+.colcard { display: flex; flex-direction: column; align-items: center; padding: 6px 4px; margin: 2px; gap: 2px; }
+.colcard img { width: 64px; height: 64px; }
+.colcard b { font-size: 7px; }
+.colcard small { font-size: 6px; color: var(--muted); }
+.colcard.unseen img { filter: brightness(0) opacity(.45); }
+.colcard.unseen { opacity: .8; }
+.colcard.on { background: #6b2d10; }
+.colcard.done b { color: var(--good); }
+.pips { display: flex; gap: 3px; }
+.pips i { width: 8px; height: 8px; background: var(--shadow); box-shadow: 0 0 0 1px var(--muted); }
+.pips i.on { background: var(--hot); }
+.col-detail { background: rgba(10, 26, 16, .55); padding: 12px; box-shadow: 0 0 0 2px var(--line), 0 0 0 4px var(--shadow); align-self: start; text-align: center; }
+.col-detail img { width: 160px; height: 160px; }
+.flavor { color: var(--muted); font-size: 8px; }
+.buyrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; text-align: left; padding: 6px 0; border-top: 1px dashed #4a7a5a; }
+.buyrow small { display: block; color: var(--muted); font-size: 6px; }
+.buyrow em { font-style: normal; color: var(--good); }
+.buyrow button { margin: 4px; padding: 6px 8px; white-space: nowrap; }
+@media (max-width: 640px) { .col-wrap { grid-template-columns: 1fr; } }

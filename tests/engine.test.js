@@ -1,4 +1,4 @@
-import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS, SPECIALS } from "../js/engine.js";
+import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS, SPECIALS, FIELD_IDS } from "../js/engine.js";
 import { DATA } from "../js/data.js";
 import { ladderRound } from "../js/meta.js";
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -100,6 +100,31 @@ ok(true, "arcade curve printed");
   ok(bad === 0, "400 battles with max-level cores, no crashes or stuck battles");
   ok(seen.size >= 8, `specials used in play: ${[...seen].sort().join(", ")}`);
   ok(allRuleOk, "KO-ALL rule: a team only loses when every robot is down (or time runs out)");
+}
+
+// every arena field: no crashes, battles end, lockstep holds
+{
+  let bad = 0, pulses = 0, syncOk = true;
+  for (const field of FIELD_IDS) for (let i = 0; i < 80; i++) {
+    const pick = (k) => R[(i * 13 + k * 5) % R.length].id;
+    const mk = (k) => ({ head: pick(k), rarm: pick(k + 1), larm: pick(k + 2), legs: pick(k + 3), core: cores[(i + k) % 6], coreLv: 1 + (i % 30) });
+    const teams2 = [[mk(0), mk(4), mk(8)], [mk(12), mk(16), mk(20)]];
+    const A2 = createBattle({ teams: teams2, data: DATA, seed: 9000 + i, field }), B2 = cloneState(A2);
+    let f = 0;
+    try {
+      while (A2.winner === null && f < 60 * 60 * 20) {
+        for (const [s2, j] of pending(A2)) { const c = aiCommand(cloneState(A2), s2, j, 3); giveCommand(A2, s2, j, c); giveCommand(B2, s2, j, c); }
+        for (const e of step(A2)) if (e.t === "field") pulses++;
+        step(B2);
+        f++;
+      }
+      if (A2.winner === null) bad++;
+      if (i < 10 && hashState(A2) !== hashState(B2)) syncOk = false;
+    } catch (e) { bad++; if (bad < 3) console.log(field, e.stack); }
+  }
+  ok(bad === 0, `${FIELD_IDS.length} arena fields x 80 battles, all finish without crashes`);
+  ok(pulses > 0, `field pulses fire (scrap storms / power surges: ${pulses})`);
+  ok(syncOk, "lockstep stays identical on every field");
 }
 // freeze stops enemies from walking
 {

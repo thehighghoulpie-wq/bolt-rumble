@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=13">
+  <link rel="stylesheet" href="css/style.css?v=14">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -23,6 +23,7 @@
         <button class="big" data-go="online">▶ VS FRIEND ONLINE</button>
         <button class="big" data-go="local">▶ VS ON THIS DEVICE</button>
         <button class="big alt" data-go="workshop">WORKSHOP</button>
+        <button class="big alt" data-go="collection">COLLECTION &amp; SHOP</button>
         <button class="big alt" data-go="help">HOW TO PLAY</button>
       </nav>
       <p class="stats" id="title-stats"></p>
@@ -78,6 +79,16 @@
       <div class="hud"><div id="hud-me" class="team"></div><div id="hud-foe" class="team"></div></div>
     </section>
 
+    <!-- COLLECTION & SHOP -->
+    <section id="s-collection" class="screen">
+      <header class="bar"><button class="back" data-back aria-label="Back">◀</button><h2>COLLECTION</h2><span class="bolts" id="col-bolts"></span></header>
+      <p class="hint" id="col-hint"></p>
+      <div class="col-wrap">
+        <div class="col-grid" id="col-grid"></div>
+        <div class="col-detail" id="col-detail"></div>
+      </div>
+    </section>
+
     <!-- TEAM READY -->
     <section id="s-ready" class="screen">
       <header class="bar"><button class="back" id="ready-back" aria-label="Back">◀</button><h2 id="ready-title">GET READY</h2><span></span></header>
@@ -131,6 +142,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-  <script type="module" src="js/ui.js?v=13"></script>
+  <script type="module" src="js/ui.js?v=14"></script>
 </body>
 </html>

@@ -33,6 +33,19 @@ export const CORE_TREE = {
   overclock: ["overclock", "salvo", "burst"], focus: ["focus", "legcrash", "stop"], haste: ["haste", "stop", "drain"],
 };
 export const TIER_LV = [1, 8, 16];
+
+// Arena terrain: each field bends the rules a little (idea from the series' terrain effects).
+export const FIELDS = {
+  normal: { name: "HEX ARENA", desc: "no tricks, just a fair fight" },
+  storm: { name: "STORM", desc: "beams and lasers +20% power, shots -10 aim" },
+  ice: { name: "ICE RINK", desc: "everyone moves 25% faster but dodges 10 less" },
+  swamp: { name: "SWAMP", desc: "walkers, tanks and wheels move 25% slower" },
+  fog: { name: "FOG", desc: "-15 aim for everything except strikes" },
+  junkyard: { name: "JUNKYARD", desc: "every 12 s a scrap storm hits all legs" },
+  lab: { name: "POWER LAB", desc: "every 10 s all cores charge +15" },
+};
+export const FIELD_IDS = Object.keys(FIELDS);
+const HOVER = ["flyer", "swimmer"];
 export const MAX_CORE_LV = 30;
 // a core works best with some part types (+15% power, repairs +30%)
 export const AFFINITY = { burst: ["shoot", "missile"], shield: ["guard", "shield"], repair: ["repair"], overclock: ["strike"], focus: ["beam", "laser"], haste: ["strike", "shoot"] };
@@ -72,9 +85,9 @@ export function makeUnit(build, data, side, idx) {
   };
 }
 
-export function createBattle({ teams, data, seed = 1, rule = "leader" }) {
+export function createBattle({ teams, data, seed = 1, rule = "leader", field = "normal" }) {
   return {
-    seed, rule: rule === "all" ? "all" : "leader", r: seed >>> 0, tick: 0, hold: 0, winner: null,
+    seed, rule: rule === "all" ? "all" : "leader", field: FIELDS[field] ? field : "normal", r: seed >>> 0, tick: 0, hold: 0, winner: null,
     sides: teams.map((t, s) => ({ units: t.map((b, i) => makeUnit(b, data, s, i)), scan: 0, shield: 0, haste: 0 })),
   };
 }
@@ -144,6 +157,8 @@ export function speedOf(state, u) {
   const legs = u.parts.legs;
   let s = legs.speed * (legs.hp > 0 ? 1 : 0.5);
   if (state.sides[u.side].haste > 0) s *= 1.4;
+  if (state.field === "ice") s *= 1.25;
+  if (state.field === "swamp" && !HOVER.includes(u.body)) s *= 0.75;
   return s;
 }
 
@@ -152,6 +167,7 @@ function evasionOf(state, u) {
   let e = legs.hp > 0 ? legs.evasion : 0;
   if (state.sides[u.side].haste > 0) e += 10;
   if (u.phase === "charge" && kindOf(u, u.cmd) === "strike") e -= 10;
+  if (state.field === "ice") e -= 10;
   return e;
 }
 
@@ -170,6 +186,7 @@ export function step(state) {
     if (s.haste > 0) s.haste--;
     for (const u of s.units) { if (u.st.shield > 0) u.st.shield--; if (u.st.stop > 0) u.st.stop--; }
   }
+  fieldPulse(state, ev);
   const arrived = [];
   for (const s of state.sides) for (const u of s.units) {
     if (u.down) continue;
@@ -198,6 +215,22 @@ export function step(state) {
     ev.push({ t: "timeup", winner: state.winner, tick: state.tick });
   }
   return ev;
+}
+
+function fieldPulse(state, ev) {
+  if (state.field === "junkyard" && state.tick % 720 === 0) {
+    ev.push({ t: "field", what: "SCRAP STORM", tick: state.tick });
+    for (const s of state.sides) for (const u of living(s)) {
+      const q = u.parts.legs;
+      if (q.hp <= 0) continue;
+      const before = q.hp;
+      q.hp = Math.max(0, q.hp - 4);
+      ev.push({ t: "attack", src: null, kind: "scrap", pname: "SCRAP", dst: [u.side, u.idx], hit: true, crit: false, hitPart: "legs", dmg: before - q.hp, broke: q.hp === 0, guarded: false, tick: state.tick });
+    }
+  } else if (state.field === "lab" && state.tick % 600 === 0) {
+    ev.push({ t: "field", what: "POWER SURGE", tick: state.tick });
+    for (const s of state.sides) for (const u of living(s)) u.meter = Math.min(100, u.meter + 15);
+  }
 }
 
 function judge(state) {
@@ -272,6 +305,8 @@ export function hitChance(state, u, part, k, t) {
   let c;
   if (k === "strike") c = 50 + speedOf(state, u) * 0.5 - evasionOf(state, t) * 0.8;
   else c = (k === "laser" ? 85 : k === "missile" ? 75 : part.accuracy) + scan - evasionOf(state, t);
+  if (state.field === "storm" && k === "shoot") c -= 10;
+  if (state.field === "fog" && k !== "strike") c -= 15;
   return clamp(c, 10, 97);
 }
 
@@ -292,6 +327,7 @@ function attack(state, u, part, k, target, log, ref, mult) {
   if (k === "strike") dmg *= 1.25 * (0.6 + speedOf(state, u) / 150);
   if (u.st.overclock > 0) dmg *= 1.5;
   if (affine(u, k)) dmg *= 1.15;
+  if (state.field === "storm" && (k === "beam" || k === "laser")) dmg *= 1.2;
   if (crit) dmg *= 1.5;
   if (guarded) dmg *= 0.6;
   if (k !== "beam") {
