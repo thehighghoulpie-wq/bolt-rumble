@@ -1,6 +1,7 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=9";
-import { PARTS } from "./engine.js?v=9";
+import { sprite, drawText, textWidth } from "./pixel.js?v=11";
+import { PARTS } from "./engine.js?v=11";
+import { sfx } from "./sfx.js?v=11";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -95,6 +96,7 @@ export class Scene {
     this.cursor = null;
     this.actor = null;
     this.state = null;
+    this.introT = 0;   // robots drop onto their stands, then RUMBLE! lands
   }
 
   setState(s) { this.state = s; }
@@ -138,6 +140,7 @@ export class Scene {
       if (e.t === "attack") {
         const src = U(e.src), dst = U(e.dst);
         const impact = () => this.impact(dst, e);
+        if (delay === 0) ({ strike: () => sfx.strike(), beam: () => sfx.beam(), burst: () => sfx.beam(), laser: () => sfx.laser(), missile: () => sfx.missile() }[e.kind] || (() => sfx.shoot()))();
         if (e.kind === "strike") this.lunge(src, dst, impact);
         else if (e.kind === "beam" || e.kind === "burst") this.beam(src, dst, e.part, e.kind === "burst" ? 22 : 14, impact);
         else if (e.kind === "laser") this.beam(src, dst, "head", 10, impact, true);
@@ -148,20 +151,25 @@ export class Scene {
         const d = U(e.dst);
         for (let i = 0; i < 10; i++) this.fx.push({ kind: "plus", x: this.center(d)[0] + rnd(-10, 10), y: this.center(d)[1] + rnd(-6, 10), vy: -rnd(0.3, 0.8), t: -i * 2, dur: 34 });
         this.text(d, "+" + e.amount, "#5cff9a", 6);
+        sfx.chime();
       } else if (e.t === "shield") {
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#7fd0ff", t: 0, dur: 30 });
+        sfx.shield();
       } else if (e.t === "scan") {
         this.fx.push({ kind: "scan", u: U(e.src), t: 0, dur: 40 });
+        sfx.scan();
       } else if (e.t === "guard") {
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#ffd23f", t: 0, dur: 24 });
+        sfx.land();
       } else if (e.t === "core") {
         this.flashT = 10;
+        sfx.riser();
         const s = U(e.src);
         for (let i = 0; i < 24; i++) this.fx.push({ kind: "spark", x: this.center(s)[0], y: this.center(s)[1], vx: rnd(-1.6, 1.6), vy: rnd(-1.8, 0.4), col: s.core.color || "#ffd23f", t: 0, dur: 28 });
       } else if (e.t === "down") {
         const d = U(e.dst);
         this.slowmo = e.leader ? 90 : 50;
-        setTimeout(() => this.explode(d), 260);
+        setTimeout(() => { this.explode(d); sfx.explode(); }, 260);
       } else if (e.t === "skip") {
         const s = U(e.src);
         this.text(s, "...", "#aab", 0);
@@ -176,7 +184,9 @@ export class Scene {
   impact(dst, e) {
     const v = this.v(dst);
     const [cx, cy] = this.center(dst);
-    if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.lunge = 0; return; }
+    if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.lunge = 0; sfx.miss(); return; }
+    if (e.crit) sfx.crit(); else sfx.hit(e.dmg >= 20 || e.kind === "strike");
+    if (e.broke) setTimeout(() => sfx.break(), 90);
     v.flash = 6; v.shake = 10;
     this.freeze = Math.max(this.freeze, e.crit ? 8 : e.kind === "strike" || e.kind === "burst" ? 5 : 3);
     if (e.crit || e.kind === "burst" || e.dmg >= 20) { this.ripple(cx, cy, e.crit ? "#ff3c3c" : "#ffffff"); this.punch(); }
@@ -239,10 +249,43 @@ export class Scene {
     for (const u of units) { const [x, y] = this.unitXY(u); g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(Math.round(x) - 9, y, 18, 2); g.fillRect(Math.round(x) - 7, y + 2, 14, 1); }
     for (const u of units) this.drawUnit(g, u);
     this.drawFx(g);
+    this.drawIntro(g);
     if (this.cursor) this.drawArrow(g, this.cursor, "#ffd23f");
     if (this.actor) this.drawArrow(g, this.actor, "#ffffff");
     g.restore();
     if (this.flashT > 0) { g.fillStyle = `rgba(255,255,255,${this.flashT / 14})`; g.fillRect(0, 0, W, H); this.flashT--; }
+  }
+
+  // minecraft-kit style build-in: each robot drops onto its stand with a bounce and a dust puff
+  dropOffset(u, x, y) {
+    const order = this.col(u.side) * 3 + [1, 0, 2][u.idx];
+    const start = 6 + order * 7, dur = 16, t = this.introT - start;
+    const v = this.v(u);
+    if (t >= dur) {
+      if (!v.landed) {
+        v.landed = true;
+        sfx.land();
+        this.shakeT = Math.max(this.shakeT, 3);
+        for (let i = 0; i < 8; i++) this.fx.push({ kind: "puff", x: x + rnd(-10, 10), y: y - rnd(0, 3), r: rnd(1, 3), t: 0, dur: 24, rise: true });
+      }
+      return 0;
+    }
+    if (t < 0) return -200;
+    let p = t / dur; // ease-out bounce
+    const b = p < 1 / 2.75 ? 7.5625 * p * p : p < 2 / 2.75 ? 7.5625 * (p -= 1.5 / 2.75) * p + 0.75 : p < 2.5 / 2.75 ? 7.5625 * (p -= 2.25 / 2.75) * p + 0.9375 : 7.5625 * (p -= 2.625 / 2.75) * p + 0.984375;
+    return Math.round(-70 * (1 - b));
+  }
+
+  drawIntro(g) {
+    this.introT++;
+    const at = 6 + 6 * 7 + 18, t = this.introT - at;
+    if (t === 0) { sfx.go(); this.shakeT = Math.max(this.shakeT, 6); }
+    if (t < 0 || t > 50) return;
+    const sc = t < 6 ? 6 - t * 0.5 : 3; // slams in with overshoot, then holds
+    const word = "RUMBLE!";
+    const w = textWidth(word, Math.round(sc));
+    if (t > 40 && t % 4 < 2) return; // blink out
+    drawText(g, word, Math.round(120 - w / 2), Math.round(70 - sc * 2.5), "#f8d838", "#6a2a00", Math.round(sc));
   }
 
   drawUnit(g, u) {
@@ -265,7 +308,7 @@ export class Scene {
     const facingRight = left ? u.phase !== "cool" || u.down : u.phase === "cool" && !u.down;
     g.save();
     if (u.down) g.globalAlpha = 0.75;
-    const dy = y - 31 + bob + (u.down ? 3 : 0);
+    const dy = y - 31 + bob + (u.down ? 3 : 0) + this.dropOffset(u, x, y);
     if (facingRight) g.drawImage(sp, x - 16, dy);
     else { g.translate(x + 16, dy); g.scale(-1, 1); g.drawImage(sp, 0, 0); }
     g.restore();

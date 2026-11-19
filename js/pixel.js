@@ -1,7 +1,7 @@
 // 8-bit sprite kit: hand-drawn part templates, palettes, composited 32x32 robots.
 // Keys: . clear  o outline  m main  M main dark  l main light  a accent  A accent dark
 //       e eye/glow  w white  g metal  G dark metal
-import { DATA } from "./data.js?v=9";
+import { DATA } from "./data.js?v=11";
 
 const HEADS = {
   dome: [

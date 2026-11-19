@@ -1,9 +1,10 @@
-import { DATA } from "./data.js?v=9";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=9";
-import { spriteImg, spriteURL } from "./pixel.js?v=9";
-import { Scene, W, H, hexField } from "./scene.js?v=9";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=9";
-import { Link, makeCode } from "./net.js?v=9";
+import { DATA } from "./data.js?v=11";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=11";
+import { spriteImg, spriteURL } from "./pixel.js?v=11";
+import { Scene, W, H, hexField } from "./scene.js?v=11";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=11";
+import { Link, makeCode } from "./net.js?v=11";
+import { sfx } from "./sfx.js?v=11";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -349,6 +350,7 @@ function endBattle() {
       if (last) profile.clears++;
       saveProfile(profile);
       head.textContent = last ? "CHAMPION!" : "VICTORY!"; head.className = "win";
+      sfx.victory(); if (got.length) setTimeout(() => sfx.unlock2(), 1200);
       text.innerHTML = (last ? "YOU BEAT ALL 20 ROUNDS!" : `ROUND ${k + 1}/${LADDER_LENGTH} CLEARED`) +
         (got.length ? `<br>NEW ROBOT: <b>${got.map((id) => esc(byId(id).name)).join(", ")}</b><br>ITS PARTS ARE IN YOUR WORKSHOP` : "");
       $("#r-bots").innerHTML = got.map((id) => spriteImg({ head: id, rarm: id, larm: id, legs: id }, 4)).join("");
@@ -362,6 +364,7 @@ function endBattle() {
     } else {
       saveProfile(profile);
       head.textContent = "DEFEATED"; head.className = "lose";
+      sfx.defeat();
       text.innerHTML = `YOUR RUN ENDED ON ROUND ${k + 1}<br>BEST: ROUND ${profile.best}`;
       acts.innerHTML = `<button class="big" id="r-retry">TRY AGAIN</button><button class="big alt" id="r-ws2">WORKSHOP</button><button class="big alt" id="r-menu">MENU</button>`;
       $("#r-retry").onclick = () => startArcade(0);
@@ -369,11 +372,13 @@ function endBattle() {
     }
   } else if (B.mode === "local") {
     head.textContent = w === "draw" ? "DRAW" : `P${w + 1} WINS!`; head.className = "win";
+    sfx.victory();
     text.textContent = "GOOD RUMBLE!";
     acts.innerHTML = `<button class="big" id="r-again">REMATCH</button><button class="big alt" id="r-menu">MENU</button>`;
     $("#r-again").onclick = () => startBattle({ mode: "local", teams: local.teams, title: "P1 VS P2" });
   } else {
     head.textContent = w === "draw" ? "DRAW" : w === B.me ? "YOU WIN!" : "YOU LOSE";
+    if (w === B.me) sfx.victory(); else sfx.defeat();
     head.className = w === B.me ? "win" : "lose";
     text.textContent = link && link.conn ? "REMATCH? BOTH PRESS REMATCH." : "YOUR RIVAL HAS LEFT.";
     acts.innerHTML = `<button class="big" id="r-rematch">REMATCH</button><button class="big alt" id="r-menu">LEAVE</button>`;
@@ -535,6 +540,7 @@ document.addEventListener("keydown", (e) => {
   const k = e.key;
   if (["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft"].includes(k)) {
     e.preventDefault();
+    sfx.tick();
     let i = btns.indexOf(document.activeElement);
     i = i < 0 ? 0 : (i + (k === "ArrowDown" || k === "ArrowRight" ? 1 : -1) + btns.length) % btns.length;
     btns[i]?.focus();
@@ -544,6 +550,20 @@ document.addEventListener("keydown", (e) => {
     scope.querySelector("#c-back, [data-back], #ready-back")?.click();
   }
 });
+
+// ------------------------------------------------------------------ sound: blips on buttons + a mute toggle
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.id === "mute") return;
+  sfx.unlock();
+  if (b.matches("[data-back], #c-back, #ready-back, #b-quit")) sfx.back(); else sfx.pop();
+}, true);
+const muteBtn = document.createElement("button");
+muteBtn.id = "mute";
+const paintMute = () => { muteBtn.textContent = sfx.muted ? "♪ OFF" : "♪ ON"; muteBtn.setAttribute("aria-label", sfx.muted ? "Sound off" : "Sound on"); };
+muteBtn.onclick = () => { sfx.toggle(); paintMute(); };
+paintMute();
+document.body.appendChild(muteBtn);
 
 // ------------------------------------------------------------------ boot
 document.body.style.backgroundImage = `url(${(() => { const c = hexField(216, 168, { palette: [[30, 84, 56], [34, 92, 60], [28, 78, 52], [32, 88, 58]] }); return c.toDataURL(); })()})`;
