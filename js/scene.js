@@ -1,7 +1,7 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=14";
-import { PARTS } from "./engine.js?v=14";
-import { sfx } from "./sfx.js?v=14";
+import { sprite, drawText, textWidth } from "./pixel.js?v=17";
+import { PARTS } from "./engine.js?v=17";
+import { sfx } from "./sfx.js?v=17";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -156,6 +156,7 @@ export class Scene {
       if (e.t === "attack") {
         const src = U(e.src), dst = U(e.dst);
         const impact = () => this.impact(dst, e);
+        if (e.aimed || e.part && e.kind === "laser" && e.aimed) this.fx.push({ kind: "scope", u: dst, t: 0, dur: 16 });
         if (delay === 0) ({ strike: () => sfx.strike(), beam: () => sfx.beam(), burst: () => sfx.beam(), laser: () => sfx.laser(), missile: () => sfx.missile() }[e.kind] || (() => sfx.shoot()))();
         if (e.kind === "legcrash") { this.shakeT = Math.max(this.shakeT, 14); setTimeout(impact, 120 + delay * 10); }
         else if (e.kind === "strike") this.lunge(src, dst, impact);
@@ -187,6 +188,14 @@ export class Scene {
         const d = U(e.dst);
         this.slowmo = e.leader ? 90 : 50;
         setTimeout(() => { this.explode(d); sfx.explode(); }, 260);
+      } else if (e.t === "transform") {
+        const u = U(e.src);
+        this.flashT = 8; this.shakeT = Math.max(this.shakeT, 8);
+        this.fx.push({ kind: "ring", u, col: "#f8d838", t: 0, dur: 30 });
+        this.fx.push({ kind: "ring", u, col: "#ffffff", t: -6, dur: 30 });
+        for (let i = 0; i < 30; i++) this.fx.push({ kind: "spark", x: this.center(u)[0], y: this.center(u)[1], vx: rnd(-2, 2), vy: rnd(-2.4, 0.2), col: i % 2 ? "#f8d838" : "#ffffff", t: 0, dur: 30 });
+        this.text(u, "TRANSFORM!", "#f8d838", 0, true);
+        sfx.riser();
       } else if (e.t === "status") {
         const d = U(e.dst);
         this.fx.push({ kind: "ring", u: d, col: "#9ff0ff", t: 0, dur: 28 });
@@ -212,6 +221,9 @@ export class Scene {
     v.flash = 6; v.shake = 10;
     this.freeze = Math.max(this.freeze, e.crit ? 8 : e.kind === "strike" || e.kind === "burst" ? 5 : 3);
     if (e.crit || e.kind === "burst" || e.dmg >= 20) { this.ripple(cx, cy, e.crit ? "#ff3c3c" : "#ffffff"); this.punch(); }
+    if (e.anti) this.text(dst, e.anti, "#9ff0ff", 10);
+    if (e.splash) { this.text(dst, "RECKLESS", "#ffb03c", 12); for (let i = 0; i < 12; i++) this.fx.push({ kind: "spark", x: cx + rnd(-10, 10), y: cy + rnd(-12, 12), vx: rnd(-1, 1), vy: rnd(-1, 1), col: "#ffb03c", t: -4, dur: 18 }); }
+    if (e.aimed) this.text(dst, "SNIPE", "#ff8a7a", 14);
     if (e.crit) { this.shakeT = 12; this.text(dst, "CRIT " + e.dmg, "#ffd23f", 0, true); }
     else this.text(dst, String(e.dmg), "#ff6b6b", 0, true);
     if (e.guarded) this.fx.push({ kind: "ring", u: dst, col: "#ffd23f", t: 0, dur: 16 });
@@ -337,6 +349,11 @@ export class Scene {
     g.restore();
     // status: shields, guard, haste trail
     const side = this.state.sides[u.side];
+    if (!u.down && u.st.transform > 0) {
+      const a = this.t % 6 < 3;
+      g.strokeStyle = a ? "#f8d838" : "#ffffff"; g.strokeRect(x - 15.5, y - 34.5, 31, 36);
+      if (this.t % 5 === 0) this.fx.push({ kind: "spark", x: x + rnd(-12, 12), y: y - rnd(2, 32), vx: 0, vy: -0.7, col: "#f8d838", t: 0, dur: 16 });
+    }
     if (!u.down && u.st.stop > 0) { g.strokeStyle = "#9ff0ff"; g.strokeRect(x - 13.5, y - 32.5, 27, 32); g.fillStyle = "rgba(159,240,255,.25)"; g.fillRect(x - 13, y - 32, 26, 31); }
     if (!u.down && (u.st.shield > 0 || side.shield > 0) && this.t % 4 < 2) { g.strokeStyle = "#7fd0ff"; g.strokeRect(x - 14.5, y - 33.5, 29, 34); }
     if (!u.down && u.st.guardedBy !== null) { g.fillStyle = "#ffd23f"; g.fillRect(x + (left ? 12 : -14), y - 22, 2, 10); }
@@ -468,6 +485,16 @@ export class Scene {
           g.strokeStyle = f.col; g.lineWidth = 1; g.globalAlpha = 1 - p;
           g.strokeRect(Math.round(cx - r) + 0.5, Math.round(cy - r) + 0.5, Math.round(r * 2), Math.round(r * 2));
           g.globalAlpha = 1;
+          break;
+        }
+        case "scope": {
+          const [cx, cy] = this.center(f.u);
+          const r = Math.round(14 - p * 8);
+          g.strokeStyle = "#ff5c5c"; g.lineWidth = 1;
+          g.strokeRect(Math.round(cx - r) + 0.5, Math.round(cy - r) + 0.5, r * 2, r * 2);
+          g.fillStyle = "#ff5c5c";
+          g.fillRect(Math.round(cx) - r - 3, Math.round(cy), 6, 1); g.fillRect(Math.round(cx) + r - 3, Math.round(cy), 6, 1);
+          g.fillRect(Math.round(cx), Math.round(cy) - r - 3, 1, 6); g.fillRect(Math.round(cx), Math.round(cy) + r - 3, 1, 6);
           break;
         }
         case "banner": {

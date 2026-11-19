@@ -1,6 +1,6 @@
 // Profile (saved in this browser) and the arcade ladder.
-import { DATA } from "./data.js?v=14";
-import { coreLevel, MAX_CORE_LV } from "./engine.js?v=14";
+import { DATA } from "./data.js?v=17";
+import { coreLevel, MAX_CORE_LV, CHIP_IDS } from "./engine.js?v=17";
 
 const KEY = "boltrumble.profile.v1";
 const STARTERS = ["r01", "r02", "r03", "r04"];
@@ -28,6 +28,8 @@ export function loadProfile() {
   if (!p.coreXP) p.coreXP = {};
   if (typeof p.bolts !== "number") p.bolts = 0;
   if (!Array.isArray(p.seen)) p.seen = [...p.unlocked];
+  if (!Array.isArray(p.chips)) p.chips = [];
+  if (!p.watch) p.watch = { steps: 0, energy: 100, target: null, built: 0, done: 0 };
   return p;
 }
 
@@ -66,6 +68,50 @@ export function earnBolts(p, won, round = 0) {
   return n;
 }
 export function markSeen(p, team) { for (const b of team) for (const s of SLOTS) if (!p.seen.includes(b[s])) p.seen.push(b[s]); }
+export const CHIP_PRICE = 180;
+export function buyChip(p, id) {
+  if (p.chips.includes(id) || !CHIP_IDS.includes(id) || p.bolts < CHIP_PRICE) return false;
+  p.bolts -= CHIP_PRICE; p.chips.push(id); return true;
+}
+// bosses hand over a chip you don't have yet
+export function takeChip(p, k) {
+  const order = CHIP_IDS.map((_, i) => CHIP_IDS[(i + k) % CHIP_IDS.length]);
+  const id = order.find((c) => !p.chips.includes(c));
+  if (id) p.chips.push(id);
+  return id || null;
+}
+
+// Bolt Watch: a mystery robot assembles itself as you take steps in battle.
+// Every 40 steps adds the next part (head, arms, legs) and that part is yours.
+export const WATCH_STEP = 40;
+export function watchTarget(p) {
+  const w = p.watch;
+  if (w.target && SLOTS.some((s) => !ownsPart(p, s, w.target))) return w.target;
+  const missing = DATA.robots.filter((r) => SLOTS.some((s) => !ownsPart(p, s, r.id))).sort((a, b) => a.tier - b.tier);
+  w.target = missing.length ? missing[Math.floor(Math.random() * Math.min(4, missing.length))].id : null;
+  w.built = 0; w.steps = 0;
+  return w.target;
+}
+export function watchSteps(p, n) {
+  const w = p.watch, got = [];
+  const id = watchTarget(p);
+  if (!id) return got;
+  const usable = Math.min(n, Math.floor(w.energy * 3));
+  w.energy = Math.max(0, w.energy - Math.ceil(usable / 3));
+  w.steps += usable;
+  while (w.steps >= WATCH_STEP && w.target) {
+    w.steps -= WATCH_STEP;
+    const slot = SLOTS.find((s) => !ownsPart(p, s, w.target));
+    if (!slot) break;
+    p.parts[slot].push(w.target);
+    got.push({ slot, id: w.target });
+    w.built = SLOTS.filter((s) => ownsPart(p, s, w.target)).length;
+    if (w.built === 4) { if (!p.unlocked.includes(w.target)) p.unlocked.push(w.target); w.done++; w.target = null; watchTarget(p); }
+  }
+  return got;
+}
+export function watchRefuel(p, quality) { p.watch.energy = Math.min(100, p.watch.energy + Math.round(20 + 40 * quality)); }
+
 export function buyPart(p, slot, id) {
   const cost = partPrice(id);
   if (ownsPart(p, slot, id) || !p.seen.includes(id) || p.bolts < cost) return false;
@@ -121,8 +167,8 @@ export const LADDER_LENGTH = PLAN.length;
 export function ladderRound(k) {
   const [title, tiers, level, mixed, rule = "leader"] = PLAN[k];
   const used = new Set();
-  const scale = [0.7, 0.8, 0.85, 0.9][k] || 1;
-  const coreLv = Math.min(MAX_CORE_LV, 1 + Math.floor(k * 1.4));
+  const scale = [0.7, 0.8, 0.85, 0.88, 0.9, 0.92, 0.92, 0.94, 0.94, 0.95][k] || 1;
+  const coreLv = Math.min(MAX_CORE_LV, 1 + k);
   const team = tiers.map((t, i) => {
     const pool = DATA.robots.filter((r) => r.tier === t && !used.has(r.id));
     const r = pool[(k * 5 + i * 3) % pool.length];
@@ -133,7 +179,7 @@ export function ladderRound(k) {
       const pick = (o) => same[(k + i + o) % same.length].id;
       return { head: r.id, rarm: pick(1), larm: pick(2), legs: pick(3), core, name: r.name, scale, coreLv };
     }
-    return { ...defaultBuild(r.id, core), scale, coreLv };
+    return { ...defaultBuild(r.id, core), scale, coreLv, chip: (title.startsWith("BOSS") || title.startsWith("FINAL")) && i === 0 ? CHIP_IDS[k % CHIP_IDS.length] : undefined };
   });
   return { title, team, level, rule, field: FIELD_PLAN[k] || "normal", boss: title.startsWith("BOSS") || title.startsWith("FINAL") };
 }

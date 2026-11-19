@@ -1,4 +1,4 @@
-import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS, SPECIALS, FIELD_IDS } from "../js/engine.js";
+import { createBattle, step, pending, giveCommand, aiCommand, autoCommands, actionsFor, cloneState, hashState, PARTS, SPECIALS, FIELD_IDS, CHIP_IDS, subSkills, terrainGrade, speedOf } from "../js/engine.js";
 import { DATA } from "../js/data.js";
 import { ladderRound } from "../js/meta.js";
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -70,7 +70,7 @@ ok(Math.min(...v) >= 8 && Math.max(...v) <= 92, `no robot hopeless or unbeatable
 const curve = [];
 for (const k of [0, 1, 2, 3, 4, 9, 14, 19]) {
   const r = ladderRound(k), tier = Math.min(5, 1 + Math.floor(k / 4));
-  const team = R.filter((x) => x.tier === tier).slice(0, 3).map((x, i) => full(x.id, i));
+  const team = R.filter((x) => x.tier === tier).slice(0, 3).map((x, i) => ({ ...full(x.id, i), coreLv: 1 + Math.floor(k * 1.3) }));
   let w = 0;
   for (let i = 0; i < 80; i++) if (play(team, r.team, 3000 + i, 3, r.level).winner === 0) w++;
   curve.push(`${k + 1}:${Math.round(w / 0.8)}%`);
@@ -125,6 +125,38 @@ ok(true, "arcade curve printed");
   ok(bad === 0, `${FIELD_IDS.length} arena fields x 80 battles, all finish without crashes`);
   ok(pulses > 0, `field pulses fire (scrap storms / power surges: ${pulses})`);
   ok(syncOk, "lockstep stays identical on every field");
+}
+
+// series systems: transform, snipe, reckless, anti-air, chips, terrain grades
+{
+  const seen = { transform: 0, aimed: 0, splash: 0, anti: 0, spread: 0 };
+  let bad = 0;
+  for (let i = 0; i < 300; i++) {
+    const ids = R.map((r) => r.id);
+    const fullSet = (k) => { const id = ids[(i * 7 + k * 11) % ids.length]; return { head: id, rarm: id, larm: id, legs: id, core: cores[(i + k) % 6], coreLv: 1 + (i % 30), chip: CHIP_IDS[(i + k) % CHIP_IDS.length] }; };
+    const st = createBattle({ teams: [[fullSet(0), fullSet(1), fullSet(2)], [fullSet(3), fullSet(4), fullSet(5)]], data: DATA, seed: 12000 + i, field: FIELD_IDS[i % FIELD_IDS.length] });
+    let f = 0;
+    try {
+      while (st.winner === null && f < 60 * 60 * 20) {
+        autoCommands(st, [0, 1], { 0: 4, 1: 4 });
+        for (const e of step(st)) {
+          if (e.t === "transform") seen.transform++;
+          if (e.aimed) seen.aimed++;
+          if (e.splash) seen.splash++;
+          if (e.anti) seen.anti++;
+          if (e.spread) seen.spread++;
+        }
+        f++;
+      }
+      if (st.winner === null) bad++;
+    } catch (e) { bad++; if (bad < 3) console.log(e.stack); }
+  }
+  ok(bad === 0, "300 full-set battles with chips on every field: no crashes");
+  ok(Object.values(seen).every((n) => n > 0), `transform ${seen.transform}, sniped hits ${seen.aimed}, reckless splashes ${seen.splash}, anti-air/sea ${seen.anti}, transformed hits shared ${seen.spread}`);
+  const fly = createBattle({ teams: [[full("r02")], [full("r02")]], data: DATA, seed: 1, field: "ice" }), fly2 = createBattle({ teams: [[full("r02")], [full("r02")]], data: DATA, seed: 1, field: "storm" });
+  ok(terrainGrade("ice", "flyer") === "A" && speedOf(fly, fly.sides[0].units[0]) > speedOf(fly2, fly2.sides[0].units[0]), "terrain grades: a flyer is faster on Ice (A) than in a Storm (D)");
+  const snipers = R.flatMap((r) => ["head", "rarm", "larm"].map((p) => r[p])).filter((x) => subSkills(x).includes("snipe")).length;
+  ok(snipers >= 15, `${snipers} parts have SNIPE`);
 }
 // freeze stops enemies from walking
 {

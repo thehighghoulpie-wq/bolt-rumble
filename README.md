@@ -7,6 +7,16 @@ An 8-bit robot battler you play in the browser. Snap on parts, charge your core,
 - **Versus on this device**: two players, one screen.
 - **Versus a friend online**: create a room, send the 5-letter code, play from two devices.
 
+## Systems
+- **Cores** level up (bronze, silver +, gold MAX) and unlock up to three specials. Each core boosts its favourite part types.
+- **Chips**: one gem per core with a passive bonus. Bosses drop them; the shop sells them.
+- **Sub-skills** on parts: SNIPE (pick which enemy part to hit, faster charge), RECKLESS (splash damage), ANTI-AIR and ANTI-SEA.
+- **Transform**: a robot in a full matching set can transform. It moves faster, and every hit is shared over its whole body.
+- **Leg types and terrain**: seven arenas, each grading the six leg types A to D. Tanks are armoured, crawlers hit hard up close, wheels shoot well.
+- **Spoils**: win a part from every rival you beat. Bosses hand over a whole robot.
+- **Collection and shop**: an album of all robots, and bolts to buy parts and chips.
+- **Bolt Watch**: a mystery robot that assembles itself from the steps your robots take in battle.
+
 ## How a battle works
 Each team has three robots. The ★ leader stands in the middle, and if its head breaks, that team loses. A robot waits on its command line until you give it an order. Then it walks to the centre while charging, does its move, and walks back to cool down. Faster legs walk faster. Every part has its own armor: broken arms can't be used, broken legs slow you down, and a broken head knocks the robot out.
 

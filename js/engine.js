@@ -9,9 +9,9 @@ const HIT_WEIGHTS = { head: 10, rarm: 27, larm: 27, legs: 36 };
 const DMG_SCALE = 0.6;
 export const TICKS_PER_SEC = 60;
 const TIME_LIMIT = 180 * TICKS_PER_SEC;
-const CHARGE_MULT = { strike: 1.25, shoot: 1, beam: 0.8, laser: 0.9, missile: 0.75, repair: 1.3, shield: 1.3, scan: 1.3, guard: 1.4, core: 1.1 };
+const CHARGE_MULT = { transform: 1.6, strike: 1.25, shoot: 1, beam: 0.8, laser: 0.9, missile: 0.75, repair: 1.3, shield: 1.3, scan: 1.3, guard: 1.4, core: 1.1 };
 const COOL_MULT = { strike: 0.8, beam: 0.9, missile: 0.8 };
-const HOLD = { strike: 58, missile: 72, core: 64, wait: 8, guard: 30 };
+const HOLD = { transform: 54, strike: 58, missile: 72, core: 64, wait: 8, guard: 30 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -45,13 +45,57 @@ export const FIELDS = {
   lab: { name: "POWER LAB", desc: "every 10 s all cores charge +15" },
 };
 export const FIELD_IDS = Object.keys(FIELDS);
-const HOVER = ["flyer", "swimmer"];
+
+// Leg type x terrain grades (A best, D worst): speed and dodge change with the ground.
+export const TERRAIN = {
+  normal: { biped: "B", crawler: "B", flyer: "B", wheels: "B", tank: "B", swimmer: "B" },
+  storm: { biped: "B", crawler: "B", flyer: "D", wheels: "B", tank: "A", swimmer: "B" },
+  ice: { biped: "C", crawler: "D", flyer: "A", wheels: "A", tank: "B", swimmer: "C" },
+  swamp: { biped: "D", crawler: "C", flyer: "B", wheels: "D", tank: "C", swimmer: "A" },
+  fog: { biped: "B", crawler: "B", flyer: "C", wheels: "B", tank: "B", swimmer: "B" },
+  junkyard: { biped: "B", crawler: "A", flyer: "B", wheels: "D", tank: "A", swimmer: "D" },
+  lab: { biped: "B", crawler: "C", flyer: "B", wheels: "A", tank: "B", swimmer: "C" },
+};
+const GRADE = { A: { spd: 1.15, eva: 5 }, B: { spd: 1, eva: 0 }, C: { spd: 0.85, eva: -5 }, D: { spd: 0.7, eva: -10 } };
+export const terrainGrade = (field, body) => (TERRAIN[field] || TERRAIN.normal)[body] || "B";
+
+// Sub-skills on parts: SNIPE (pick the enemy part, faster charge), RECKLESS (damage splashes
+// over every part), ANTI-AIR (missiles vs flyers), ANTI-SEA (lasers vs swimmers).
+export function subSkills(part) {
+  const out = [];
+  if (!part) return out;
+  if (part.kind === "laser" || ((part.kind === "shoot" || part.kind === "beam") && part.accuracy >= 85)) out.push("snipe");
+  if (part.kind === "strike" && part.power >= 40) out.push("reckless");
+  if (part.kind === "missile") out.push("antiair");
+  if (part.kind === "laser") out.push("antisea");
+  return out;
+}
+export const SUBSKILL_NAME = { snipe: "SNIPE", reckless: "RECKLESS", antiair: "ANTI-AIR", antisea: "ANTI-SEA" };
+
+// Chips: one gem per core with a passive bonus.
+export const CHIPS = {
+  armor: { name: "PLATE CHIP", desc: "+12% armor on every part" },
+  speed: { name: "TURBO CHIP", desc: "+8 leg speed" },
+  aim: { name: "LENS CHIP", desc: "+8 aim on every attack" },
+  crit: { name: "EDGE CHIP", desc: "+8% critical hits" },
+  charge: { name: "SPARK CHIP", desc: "start the fight with 40 core" },
+  surge: { name: "DYNAMO CHIP", desc: "core fills 50% faster" },
+  exstrike: { name: "FIST CHIP", desc: "core also boosts strikes" },
+  exshoot: { name: "SIGHT CHIP", desc: "core also boosts shots" },
+  exbeam: { name: "PRISM CHIP", desc: "core also boosts beams and lasers" },
+  exrepair: { name: "MEDIC CHIP", desc: "core also boosts repairs" },
+};
+export const CHIP_IDS = Object.keys(CHIPS);
+const CHIP_EX = { exstrike: ["strike"], exshoot: ["shoot", "missile"], exbeam: ["beam", "laser"], exrepair: ["repair"] };
+
+// Transform: a robot wearing a full matching set can transform once its core is half full.
+export const canTransform = (u) => !u.down && !u.st.transformed && u.meter >= 50 && u.fullSet && PARTS.every((p) => u.parts[p].hp > 0);
 export const MAX_CORE_LV = 30;
 // a core works best with some part types (+15% power, repairs +30%)
 export const AFFINITY = { burst: ["shoot", "missile"], shield: ["guard", "shield"], repair: ["repair"], overclock: ["strike"], focus: ["beam", "laser"], haste: ["strike", "shoot"] };
 export const coreLevel = (xp) => Math.min(MAX_CORE_LV, 1 + Math.floor((xp || 0) / 60));
 export const specialsFor = (core, lv) => (CORE_TREE[core.special] || [core.special]).filter((_, i) => lv >= TIER_LV[i]);
-const affine = (u, kind) => (AFFINITY[u.core.special] || []).includes(kind);
+const affine = (u, kind) => (AFFINITY[u.core.special] || []).includes(kind) || (CHIP_EX[u.chip] || []).includes(kind);
 
 function rand(state) {
   state.r = (state.r + 0x6D2B79F5) >>> 0;
@@ -69,7 +113,7 @@ export function makeUnit(build, data, side, idx) {
     const src = byId(build[p]);
     if (!src) throw new Error("unknown robot " + build[p]);
     const def = { ...src[p], from: src.id };
-    def.armor = Math.max(1, Math.round(def.armor * sc));
+    def.armor = Math.max(1, Math.round(def.armor * sc * (build.chip === "armor" ? 1.12 : 1)));
     if (def.power) def.power = Math.max(1, Math.round(def.power * sc));
     parts[p] = { ...def, max: def.armor, hp: def.armor, usesLeft: def.uses ?? null };
   }
@@ -77,11 +121,12 @@ export function makeUnit(build, data, side, idx) {
   const core = data.cores.find((c) => c.id === build.core) || data.cores[0];
   const coreLv = clamp(Math.floor(build.coreLv || 1), 1, MAX_CORE_LV);
   return {
-    coreLv, specials: specialsFor(core, coreLv),
+    coreLv, specials: specialsFor(core, coreLv), chip: CHIPS[build.chip] ? build.chip : null,
+    fullSet: build.head === build.rarm && build.head === build.larm && build.head === build.legs,
     side, idx, name: build.name || look.name, body: byId(build.legs).body, colors: look.colors,
-    build: { ...build }, core, meter: 0, parts, down: false,
+    build: { ...build }, core, meter: build.chip === "charge" ? 40 : 0, parts, down: false,
     pos: 0, phase: "cmd", cmd: null, lastKind: null,
-    st: { shield: 0, overclock: 0, focus: 0, stop: 0, guarding: null, guardedBy: null },
+    st: { shield: 0, overclock: 0, focus: 0, stop: 0, transform: 0, transformed: false, guarding: null, guardedBy: null },
   };
 }
 
@@ -116,6 +161,7 @@ export function actionsFor(state, side, idx) {
     else if (k === "scan" || k === "missile") out.push({ part: p, kind: k, targets: [null] });
     else out.push({ part: p, kind: k, targets: foes });
   }
+  if (canTransform(u)) out.push({ part: "transform", kind: "transform", targets: [null] });
   if (u.meter >= 100) for (const sp of u.specials) out.push({ part: "core", kind: sp, special: sp, targets: SPECIALS[sp]?.foe ? foes : [null] });
   const ok = out.filter((a) => a.targets.length > 0);
   if (!ok.length) ok.push({ part: "wait", kind: "wait", targets: [null] });
@@ -133,6 +179,7 @@ export function pending(state) {
 export function kindOf(u, action) {
   if (!action || action.part === "wait") return "wait";
   if (action.part === "core") return "core";
+  if (action.part === "transform") return "transform";
   return u.parts[action.part]?.kind || "wait";
 }
 
@@ -144,6 +191,7 @@ export function giveCommand(state, side, idx, action) {
   const pick = a || legal[0];
   u.cmd = { part: pick.part, target: pick.targets.includes(action?.target) ? action.target : pick.targets[0] };
   if (pick.special) u.cmd.special = pick.special;
+  if (action && PARTS.includes(action.aim) && subSkills(u.parts[pick.part]).includes("snipe")) u.cmd.aim = action.aim;
   u.phase = "charge";
   if (u.st.guarding !== null) {
     const g = state.sides[side].units[u.st.guarding];
@@ -158,7 +206,9 @@ export function speedOf(state, u) {
   let s = legs.speed * (legs.hp > 0 ? 1 : 0.5);
   if (state.sides[u.side].haste > 0) s *= 1.4;
   if (state.field === "ice") s *= 1.25;
-  if (state.field === "swamp" && !HOVER.includes(u.body)) s *= 0.75;
+  s *= GRADE[terrainGrade(state.field, u.body)].spd;
+  if (u.chip === "speed") s += 8;
+  if (u.st.transform > 0) s *= 1.15;
   return s;
 }
 
@@ -168,6 +218,7 @@ function evasionOf(state, u) {
   if (state.sides[u.side].haste > 0) e += 10;
   if (u.phase === "charge" && kindOf(u, u.cmd) === "strike") e -= 10;
   if (state.field === "ice") e -= 10;
+  e += GRADE[terrainGrade(state.field, u.body)].eva;
   return e;
 }
 
@@ -191,7 +242,7 @@ export function step(state) {
   for (const s of state.sides) for (const u of s.units) {
     if (u.down) continue;
     if (u.phase === "charge") {
-      u.pos = Math.min(1, u.pos + velocity(state, u) * (CHARGE_MULT[kindOf(u, u.cmd)] || 1));
+      u.pos = Math.min(1, u.pos + velocity(state, u) * (CHARGE_MULT[kindOf(u, u.cmd)] || 1) * (u.cmd && u.cmd.aim ? 1.25 : 1));
       if (u.pos >= 1) arrived.push(u);
     } else if (u.phase === "cool") {
       u.pos = Math.max(0, u.pos - velocity(state, u) * 1.25 * (COOL_MULT[u.lastKind] || 1));
@@ -263,6 +314,12 @@ function perform(state, u, a, log) {
   const mySide = state.sides[u.side];
   if (!a || a.part === "wait") { log.push({ t: "skip", src: [u.side, u.idx], why: "no usable parts" }); return; }
   if (a.part === "core") return doCore(state, u, a, log);
+  if (a.part === "transform") {
+    if (!canTransform(u)) { log.push({ t: "skip", src: [u.side, u.idx], why: "can't transform" }); return; }
+    u.meter -= 50; u.st.transformed = true; u.st.transform = 4;
+    log.push({ t: "transform", src: [u.side, u.idx], pname: "TRANSFORM" });
+    return;
+  }
   const part = u.parts[a.part];
   if (!usable(u, a.part)) { log.push({ t: "skip", src: [u.side, u.idx], part: a.part, why: "part broken" }); return; }
   const k = part.kind;
@@ -293,10 +350,11 @@ function perform(state, u, a, log) {
     }
   } else {
     const t = pickTarget(state, 1 - u.side, a.target);
-    if (t) attack(state, u, part, k, t, log, ref, 1);
+    if (t) attack(state, u, part, k, t, log, a.aim ? { ...ref, aim: a.aim } : ref, 1);
   }
   if (u.st.overclock > 0) u.st.overclock--;
   if (u.st.focus > 0) u.st.focus--;
+  if (u.st.transform > 0) u.st.transform--;
 }
 
 export function hitChance(state, u, part, k, t) {
@@ -307,6 +365,7 @@ export function hitChance(state, u, part, k, t) {
   else c = (k === "laser" ? 85 : k === "missile" ? 75 : part.accuracy) + scan - evasionOf(state, t);
   if (state.field === "storm" && k === "shoot") c -= 10;
   if (state.field === "fog" && k !== "strike") c -= 15;
+  if (u.chip === "aim") c += 8;
   return clamp(c, 10, 97);
 }
 
@@ -316,18 +375,27 @@ function attack(state, u, part, k, target, log, ref, mult) {
     const g = state.sides[t.side].units[t.st.guardedBy];
     if (g && !g.down && intact(g, "larm") && g.st.guarding === t.idx) { t = g; guarded = true; }
   }
-  const chance = hitChance(state, u, part, k, t);
+  const chance = hitChance(state, u, part, k, t) - (ref.aim === "head" && u.st.focus <= 0 ? 15 : 0);
   const ev = { t: "attack", ...ref, dst: [t.side, t.idx], guarded, chance: Math.round(chance) };
   if (rand(state) * 100 >= chance) { ev.hit = false; log.push(ev); return; }
   const scan = state.sides[u.side].scan > 0 ? 0.1 : 0;
-  const crit = rand(state) < 0.05 + scan || u.st.focus > 0;
-  let hitPart = guarded ? "larm" : crit ? "head" : weightedPart(state, t);
+  const crit = (rand(state) < 0.05 + scan + (u.chip === "crit" ? 0.08 : 0) && !subSkills(part).includes("reckless")) || u.st.focus > 0;
+  const aim = ref.aim && intact(t, ref.aim) ? ref.aim : null;
+  let hitPart = guarded ? "larm" : aim || (crit ? "head" : weightedPart(state, t));
   if (!intact(t, hitPart)) hitPart = "head";
   let dmg = part.power * DMG_SCALE * mult * (0.85 + rand(state) * 0.3);
   if (k === "strike") dmg *= 1.25 * (0.6 + speedOf(state, u) / 150);
   if (u.st.overclock > 0) dmg *= 1.5;
   if (affine(u, k)) dmg *= 1.15;
   if (state.field === "storm" && (k === "beam" || k === "laser")) dmg *= 1.2;
+  // leg-type traits: tanks are armoured, multi-legs hit hard up close, wheels shoot well from range
+  if (t.body === "tank") dmg *= 0.85;
+  if (t.parts.larm.kind === "guard" && intact(t, "larm")) dmg *= 0.9;
+  if (u.body === "crawler" && k === "strike") dmg *= 1.1;
+  if (u.body === "wheels" && (k === "shoot" || k === "beam")) dmg *= 1.1;
+  const subs = subSkills(part);
+  if (subs.includes("antiair") && t.body === "flyer") { dmg *= 1.35; ev.anti = "ANTI-AIR"; }
+  if (subs.includes("antisea") && t.body === "swimmer") { dmg *= 1.35; ev.anti = "ANTI-SEA"; }
   if (crit) dmg *= 1.5;
   if (guarded) dmg *= 0.6;
   if (k !== "beam") {
@@ -335,15 +403,38 @@ function attack(state, u, part, k, target, log, ref, mult) {
     if (state.sides[t.side].shield > 0) dmg *= 0.5;
   }
   dmg = Math.max(1, Math.round(dmg));
+  // a transformed robot spreads every hit over its whole body
+  if (t.st.transform > 0) {
+    const live = PARTS.filter((x) => intact(t, x));
+    const share = Math.max(1, Math.ceil(dmg / live.length));
+    let tot = 0, brokeAny = false;
+    for (const x of live) { const q = t.parts[x], b = q.hp; q.hp = Math.max(0, q.hp - share); tot += b - q.hp; if (q.hp === 0) brokeAny = true; }
+    u.meter = Math.min(100, u.meter + Math.round(tot * 0.6 * (u.chip === "surge" ? 1.5 : 1)) + 4);
+    Object.assign(ev, { hit: true, crit, hitPart: "head", dmg: tot, broke: brokeAny, spread: true });
+    log.push(ev);
+    if (t.parts.head.hp === 0) { t.down = true; log.push({ t: "down", dst: [t.side, t.idx], leader: t.idx === 0 }); }
+    return;
+  }
   const p = t.parts[hitPart];
   const before = p.hp;
   p.hp = Math.max(0, p.hp - dmg);
-  const dealt = before - p.hp;
-  u.meter = Math.min(100, u.meter + Math.round(dealt * 0.6) + 4);
-  t.meter = Math.min(100, t.meter + Math.round(dealt * 0.8) + (p.hp === 0 ? 20 : 0));
-  Object.assign(ev, { hit: true, crit, hitPart, dmg: dealt, broke: p.hp === 0 && before > 0 });
+  let dealt = before - p.hp;
+  // reckless strikes splash 20% onto the other arms and legs
+  if (subs.includes("reckless") && !guarded) {
+    let splash = 0;
+    for (const x of PARTS) {
+      if (x === hitPart || x === "head" || !intact(t, x)) continue;
+      const q = t.parts[x], b = q.hp;
+      q.hp = Math.max(0, q.hp - Math.max(1, Math.round(dmg * 0.15)));
+      splash += b - q.hp;
+    }
+    if (splash) { ev.splash = splash; dealt += splash; }
+  }
+  u.meter = Math.min(100, u.meter + Math.round(dealt * 0.6 * (u.chip === "surge" ? 1.5 : 1)) + 4);
+  t.meter = Math.min(100, t.meter + Math.round(dealt * 0.8 * (t.chip === "surge" ? 1.5 : 1)) + (p.hp === 0 ? 20 : 0));
+  Object.assign(ev, { hit: true, crit, hitPart, dmg: dealt, broke: p.hp === 0 && before > 0, aimed: !!aim });
   log.push(ev);
-  if (hitPart === "head" && p.hp === 0) {
+  if (t.parts.head.hp === 0 && !t.down) {
     t.down = true;
     if (t.st.guarding !== null) { const g = state.sides[t.side].units[t.st.guarding]; if (g) g.st.guardedBy = null; }
     log.push({ t: "down", dst: [t.side, t.idx], leader: t.idx === 0 });
@@ -428,6 +519,7 @@ export function aiCommand(state, side, idx, level = 3) {
   const roll = () => rand(state);
   const acts = actionsFor(state, side, idx);
   const hurt = living(me).filter((x) => PARTS.some((p) => x.parts[p].hp > 0 && x.parts[p].hp < x.parts[p].max * 0.5));
+  if (acts.some((a) => a.part === "transform") && roll() < 0.35) return { part: "transform", target: null };
   const cores = acts.filter((a) => a.part === "core");
   if (cores.length) {
     const want = hurt.length >= 2 ? cores.find((c) => c.special === "repair") : null;
@@ -455,7 +547,12 @@ export function aiCommand(state, side, idx, level = 3) {
     const v = pw * hitChance(state, u, p, a.kind, tUnit) * (a.part === "head" ? 0.9 : 1) * (CHARGE_MULT[a.kind] || 1) + roll() * 5;
     if (v > bestV) { bestV = v; best = a; }
   }
-  return { part: best.part, target: best.kind === "missile" ? null : target };
+  let aim;
+  if (subSkills(u.parts[best.part]).includes("snipe") && level >= 3) {
+    const x = roll();
+    aim = tUnit.parts.head.hp <= u.parts[best.part].power * 0.5 || x < 0.3 ? "head" : x < 0.65 && intact(tUnit, "legs") ? "legs" : undefined;
+  }
+  return { part: best.part, target: best.kind === "missile" ? null : target, aim };
 }
 
 function leaderOr(foe, foes, roll, level) {

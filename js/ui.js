@@ -1,10 +1,10 @@
-import { DATA } from "./data.js?v=14";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS } from "./engine.js?v=14";
-import { spriteImg, spriteURL } from "./pixel.js?v=14";
-import { Scene, W, H, hexField } from "./scene.js?v=14";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart } from "./meta.js?v=14";
-import { Link, makeCode } from "./net.js?v=14";
-import { sfx } from "./sfx.js?v=14";
+import { DATA } from "./data.js?v=17";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform } from "./engine.js?v=17";
+import { spriteImg, spriteURL } from "./pixel.js?v=17";
+import { Scene, W, H, hexField } from "./scene.js?v=17";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=17";
+import { Link, makeCode } from "./net.js?v=17";
+import { sfx } from "./sfx.js?v=17";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -23,6 +23,9 @@ const KIND_HINT = {
 };
 
 let profile = loadProfile();
+const subTags = (part) => subSkills(part).map((x) => `<i class="sub ${x}">${SUBSKILL_NAME[x]}</i>`).join("");
+// cores evolve their names as they grow (bronze, silver +, gold MAX)
+const coreTitle = (c, lv) => c.name + (lv >= MAX_CORE_LV ? " MAX" : lv >= TIER_LV[2] ? "+" : "");
 let backTo = "title";
 let B = null, link = null, online = null, scene = null;
 
@@ -46,6 +49,7 @@ function go(where) {
   if (where === "online") { leaveOnline(); resetLobby(); return show("online"); }
   if (where === "help") return show("help");
   if (where === "collection") { COL = null; renderCollection(); return show("collection"); }
+  if (where === "watch") { renderWatch(); return show("watch"); }
 }
 
 function renderTitle() {
@@ -91,17 +95,22 @@ function renderWorkshop() {
       const x = r[p];
       const pv = { head: r.id, rarm: r.id, larm: r.id, legs: r.id };
       return `<button class="chip ${b[p] === r.id ? "on" : ""}" data-p="${p}" data-id="${r.id}">
-        ${spriteImg(pv, 1)}<span><b>${esc(x.name)}</b><small>${esc(r.name)} · ${p === "legs" ? r.body.toUpperCase() : KIND_TEXT[x.kind]}</small><small>${partLine(r, p)}</small></span></button>`;
+        ${spriteImg(pv, 1)}<span><b>${esc(x.name)}</b><small>${esc(r.name)} · ${p === "legs" ? r.body.toUpperCase() : KIND_TEXT[x.kind]}</small><small>${partLine(r, p)}</small>${p === "legs" ? "" : subTags(x)}</span></button>`;
     }).join("") + `</div>`;
   }
   html += `<h4>CORE</h4><div class="chips">` + DATA.cores.map((c) => {
     const lv = lvOf(c.id);
     const tierCls = lv >= 16 ? "gold" : lv >= 8 ? "silver" : "bronze";
-    return `<button class="chip core ${b.core === c.id ? "on" : ""}" data-core="${c.id}"><i class="dot ${tierCls}" style="background:${c.color}"></i><span><b>${esc(c.name)} <em>LV ${lv}</em></b>
+    return `<button class="chip core ${b.core === c.id ? "on" : ""}" data-core="${c.id}"><i class="dot ${tierCls}" style="background:${c.color}"></i><span><b>${esc(coreTitle(c, lv))} <em>LV ${lv}</em></b>
       <small>${(CORE_TREE[c.special] || []).map((sp, i) => lv >= TIER_LV[i] ? esc(SPECIALS[sp].name) : `<s>${esc(SPECIALS[sp].name)} LV${TIER_LV[i]}</s>`).join(" · ")}</small>
       <small class="hint">BOOSTS ${(AFFINITY[c.special] || []).map((k) => KIND_TEXT[k]).join(" + ")}</small></span></button>`;
   }).join("") + `</div>`;
+  const chipPool = WS.levels ? profile.chips : CHIP_IDS;
+  html += `<h4>CHIP <small>${chipPool.length}/${CHIP_IDS.length}</small></h4><div class="chips">` +
+    `<button class="chip ${!b.chip ? "on" : ""}" data-chip=""><span><b>NO CHIP</b><small>win chips from bosses or buy them</small></span></button>` +
+    chipPool.map((c) => `<button class="chip gem ${b.chip === c ? "on" : ""}" data-chip="${c}"><i class="gemdot ${c}"></i><span><b>${esc(CHIPS[c].name)}</b><small>${esc(CHIPS[c].desc)}</small></span></button>`).join("") + `</div>`;
   $("#ws-parts").innerHTML = html;
+  $("#ws-parts").querySelectorAll("[data-chip]").forEach((x) => x.onclick = () => { if (x.dataset.chip) b.chip = x.dataset.chip; else delete b.chip; renderWorkshop(); });
   $("#ws-parts").querySelectorAll("[data-p]").forEach((x) => x.onclick = () => {
     const wasDefault = b.name === byId(b.head).name;
     b[x.dataset.p] = x.dataset.id;
@@ -110,8 +119,9 @@ function renderWorkshop() {
   });
   $("#ws-parts").querySelectorAll("[data-core]").forEach((x) => x.onclick = () => { b.core = x.dataset.core; renderWorkshop(); });
   const parts = PARTS.map((p) => byId(b[p])[p]);
+  const fullSetNote = b.head === b.rarm && b.head === b.larm && b.head === b.legs ? "<br><b>FULL SET: CAN TRANSFORM</b>" : "";
   $("#ws-sum").innerHTML = `ARMOR <b>${parts.reduce((a, x) => a + x.armor, 0)}</b> · SPEED <b>${parts[3].speed}</b> · EVADE <b>${parts[3].evasion}</b><br>
-    CORE <b>${esc(coreById(b.core).name)} LV ${lvOf(b.core)}</b> · BOOSTS ${(AFFINITY[coreById(b.core).special] || []).map((k) => KIND_TEXT[k]).join(" + ")}`;
+    CORE <b>${esc(coreById(b.core).name)} LV ${lvOf(b.core)}</b> · BOOSTS ${(AFFINITY[coreById(b.core).special] || []).map((k) => KIND_TEXT[k]).join(" + ")}${b.chip ? `<br>CHIP <b>${esc(CHIPS[b.chip].name)}</b>: ${esc(CHIPS[b.chip].desc)}` : ""}${fullSetNote}`;
   $("#ws-done").onclick = () => WS.onDone();
 }
 
@@ -121,7 +131,7 @@ cv.addEventListener("click", (e) => {
   if (!B || !B.target) return;
   const r = cv.getBoundingClientRect();
   const hit = scene.unitAtPoint((e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
-  if (hit && hit[0] === B.target.side && B.target.list.includes(hit[1])) issue({ part: B.target.part, special: B.target.special, target: hit[1] });
+  if (hit && hit[0] === B.target.side && B.target.list.includes(hit[1])) { if (B.target.snipe) { B.target.aimFor = hit[1]; renderCmd(); } else issue({ part: B.target.part, special: B.target.special, target: hit[1] }); }
 });
 cv.addEventListener("mousemove", (e) => {
   if (!B || !B.target) return;
@@ -223,6 +233,17 @@ function renderCmd() {
   const box = $("#b-cmd");
   box.classList.remove("hidden");
   const tag = B.mode === "local" ? `<em class="tag p${s + 1}">${sideTag(s)}</em>` : "";
+  if (B.target && B.target.aimFor !== undefined) {
+    const t = B.target, foe = B.state.sides[t.side].units[t.aimFor];
+    box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b> ▶ ${esc(t.label)} ▶ ${esc(foe.name)} · SNIPE WHICH PART?</div>
+      <div class="opts">${PARTS.filter((x) => foe.parts[x].hp > 0).map((x) => `<button class="opt" data-aim="${x}"><span><b>${PART_LABEL[x]}</b><small>${foe.parts[x].hp}/${foe.parts[x].max} ARMOR${x === "head" ? " · HARDER TO HIT" : ""}</small></span></button>`).join("")}
+      <button class="opt" data-aim=""><span><b>ANY PART</b><small>normal shot</small></span></button></div>
+      <div class="row2"><button id="c-back">◀ BACK</button></div>`;
+    box.querySelectorAll("[data-aim]").forEach((b) => b.onclick = () => issue({ part: t.part, target: t.aimFor, aim: b.dataset.aim || undefined }));
+    box.querySelector("[data-aim]")?.focus({ preventScroll: true });
+    $("#c-back").onclick = () => { delete B.target.aimFor; renderCmd(); };
+    return;
+  }
   if (B.target) {
     const t = B.target;
     const units = B.state.sides[t.side].units;
@@ -230,7 +251,7 @@ function renderCmd() {
       <div class="opts">${t.list.map((x) => `<button class="opt" data-t="${x}">${spriteImg(units[x].build, 1, { flip: t.side !== B.me })}<span><b>${esc(units[x].name)}</b><small>HEAD ${units[x].parts.head.hp}/${units[x].parts.head.max}${x === 0 ? " · LEADER" : ""}</small></span></button>`).join("")}</div>
       <div class="row2"><button id="c-back">◀ BACK</button></div>`;
     box.querySelectorAll("[data-t]").forEach((b) => {
-      b.onclick = () => issue({ part: t.part, special: t.special, target: +b.dataset.t });
+      b.onclick = () => (t.snipe ? (B.target.aimFor = +b.dataset.t, renderCmd()) : issue({ part: t.part, special: t.special, target: +b.dataset.t }));
       b.onmouseenter = b.onfocus = () => { scene.cursor = [t.side, +b.dataset.t]; };
     });
     scene.cursor = [t.side, t.list[0]];
@@ -241,20 +262,22 @@ function renderCmd() {
   const acts = actionsFor(B.state, s, i);
   box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b>${i === 0 ? " ★" : ""} · WHAT'S THE MOVE?</div>
     <div class="opts">${acts.map((a, n) => {
+      if (a.part === "transform") return `<button class="opt core transform" data-n="${n}"><span><b>⚡ TRANSFORM</b><small>full set: faster, hits are shared by the whole body</small></span></button>`;
       if (a.part === "core") return `<button class="opt core" data-n="${n}"><span><b>★ ${esc(SPECIALS[a.special].name)}</b><small>${esc(SPECIALS[a.special].desc)}</small></span></button>`;
       if (a.part === "wait") return `<button class="opt" data-n="${n}"><span><b>WAIT</b><small>no usable parts</small></span></button>`;
       const q = u.parts[a.part];
       const meta = [PART_LABEL[a.part], KIND_TEXT[a.kind]];
       if (q.power) meta.push("PWR " + q.power);
       if (a.part === "head") meta.push(q.usesLeft + " LEFT");
-      return `<button class="opt" data-n="${n}"><span><b>${esc(q.name)}</b><small>${meta.join(" · ")}</small><small class="hint">${KIND_HINT[a.kind] || ""}</small></span></button>`;
+      return `<button class="opt" data-n="${n}"><span><b>${esc(q.name)}</b><small>${meta.join(" · ")}</small><small class="hint">${KIND_HINT[a.kind] || ""}</small>${subTags(q)}</span></button>`;
     }).join("")}</div>
     <div class="row2"><button id="c-auto">AUTO</button></div>`;
   box.querySelectorAll("[data-n]").forEach((b) => b.onclick = () => {
     const a = acts[+b.dataset.n];
     if (a.targets[0] === null) return issue({ part: a.part, special: a.special, target: null });
     const label = a.part === "core" ? SPECIALS[a.special].name : u.parts[a.part].name;
-    B.target = { part: a.part, special: a.special, side: a.ally ? s : 1 - s, list: a.targets, label };
+    const snipe = a.part !== "core" && !a.ally && subSkills(u.parts[a.part]).includes("snipe");
+    B.target = { part: a.part, special: a.special, side: a.ally ? s : 1 - s, list: a.targets, label, snipe };
     renderCmd();
   });
   $("#c-auto").onclick = () => issue(aiCommand(clone(B.state), s, i, 3));
@@ -262,6 +285,7 @@ function renderCmd() {
 }
 
 function issue(cmd) {
+  if (!B || !B.cmdFor) return;
   const [s, i] = B.cmdFor;
   const tick = B.state.tick;
   if (!giveCommand(B.state, s, i, cmd)) return;
@@ -276,7 +300,8 @@ function describe(e) {
     case "attack":
       if (!e.src) return `${esc(e.pname)}! ${dst}'S ${PART_LABEL[e.hitPart]} -${e.dmg}${e.broke ? " · BROKEN!" : ""}`;
       if (!e.hit) return `${src}: ${esc(e.pname)}! ${dst} DODGED!`;
-      return `${src}: ${esc(e.pname)}! ${e.crit ? "CRITICAL! " : ""}${dst}'S ${PART_LABEL[e.hitPart]} -${e.dmg}${e.broke ? " · BROKEN!" : ""}${e.guarded ? " (GUARDED)" : ""}`;
+      if (e.spread) return `${src}: ${esc(e.pname)}! ${dst} (TRANSFORMED) SHRUGS OFF -${e.dmg} ACROSS ITS BODY`;
+      return `${src}: ${esc(e.pname)}! ${e.aimed ? "SNIPED! " : ""}${e.anti ? e.anti + "! " : ""}${e.splash ? "RECKLESS! " : ""}${e.crit ? "CRITICAL! " : ""}${dst}'S ${PART_LABEL[e.hitPart]} -${e.dmg}${e.broke ? " · BROKEN!" : ""}${e.guarded ? " (GUARDED)" : ""}`;
     case "down": return `${dst} IS OUT OF ACTION!${e.leader ? " LEADER DOWN!" : ""}`;
     case "repair": return `${src} REPAIRS ${dst} +${e.amount}`;
     case "shield": return `${src} SHIELDS ${dst}!`;
@@ -285,6 +310,7 @@ function describe(e) {
     case "core": return `${src} UNLEASHES ${esc(e.pname)}!`;
     case "skip": return `${src} CAN'T ACT: ${esc(e.why).toUpperCase()}`;
     case "status": return `${dst} IS ${esc(e.what)}!`;
+    case "transform": return `${src} TRANSFORMS!`;
     case "field": return `<b>${esc(e.what)}!</b>`;
     case "win": return B.mode === "local" ? `P${e.winner + 1} WINS!` : e.winner === B.me ? "YOU WIN!" : "YOU LOSE...";
     case "timeup": return "TIME UP! JUDGE'S DECISION...";
@@ -294,6 +320,7 @@ function describe(e) {
 
 function onEvents(ev) {
   scene.handle(ev);
+  for (const e of ev) if (e.src && e.src[0] === B.me && (e.t === "attack" || e.t === "repair" || e.t === "shield" || e.t === "scan" || e.t === "guard" || e.t === "core" || e.t === "transform")) B.mySteps = (B.mySteps || 0) + (e.t === "attack" ? 2 : 3);
   const lines = ev.map(describe).filter(Boolean);
   if (lines.length) setMsg(lines.slice(0, 2).join("<br>"));
 }
@@ -358,6 +385,8 @@ function endBattle() {
       const bolts = earnBolts(profile, true, k);
       const spoil = takeSpoils(profile, enemy.team, Math.random, rewardsFor(k));
       const whole = enemy.boss ? takeWholeRobot(profile, rewardsFor(k)) : null;
+      const chip = enemy.boss ? takeChip(profile, k) : null;
+      const watchGot = watchSteps(profile, B.mySteps || 0);
       const got = whole ? [whole] : [];
       const xp = grantCoreXP(profile, profile.team, true, k);
       const last = k === LADDER_LENGTH - 1;
@@ -368,6 +397,8 @@ function endBattle() {
       text.innerHTML = (last ? "YOU BEAT ALL 20 ROUNDS!" : `ROUND ${k + 1}/${LADDER_LENGTH} CLEARED`) +
         (spoil ? `<br>SPOILS: <b>${esc(byId(spoil.id)[spoil.slot].name)}</b> (${PART_LABEL[spoil.slot]} OF ${esc(byId(spoil.id).name)})` : "") +
         (got.length ? `<br>BOSS PRIZE: THE WHOLE <b>${got.map((id) => esc(byId(id).name)).join(", ")}</b>!` : "") +
+        (chip ? `<br>CHIP: <b>${esc(CHIPS[chip].name)}</b> (${esc(CHIPS[chip].desc)})` : "") +
+        watchLine(watchGot) +
         `<br>+${bolts} BOLTS · CORES +${xp.gain} XP` + xp.ups.map((u) => `<br><b>${esc(coreById(u.core).name)} LV ${u.to}!</b>${newSpecials(u)}`).join("");
       $("#r-bots").innerHTML = (got.length ? got.map((id) => spriteImg({ head: id, rarm: id, larm: id, legs: id }, 4, { smooth: true })) : spoil ? [spriteImg({ head: spoil.id, rarm: spoil.id, larm: spoil.id, legs: spoil.id }, 4, { smooth: true })] : []).join("");
       acts.innerHTML = last ? `<button class="big" id="r-menu">MENU</button>` :
@@ -380,10 +411,11 @@ function endBattle() {
     } else {
       const xp = grantCoreXP(profile, profile.team, false, k);
       const bolts = earnBolts(profile, false, k);
+      const watchGot = watchSteps(profile, B.mySteps || 0);
       saveProfile(profile);
       head.textContent = "DEFEATED"; head.className = "lose";
       sfx.defeat();
-      text.innerHTML = `YOUR RUN ENDED ON ROUND ${k + 1}<br>BEST: ROUND ${profile.best}<br>+${bolts} BOLTS · CORES +${xp.gain} XP` + xp.ups.map((u) => `<br><b>${esc(coreById(u.core).name)} LV ${u.to}!</b>${newSpecials(u)}`).join("");
+      text.innerHTML = watchLine(watchGot).replace(/^<br>/, "") + `<br>YOUR RUN ENDED ON ROUND ${k + 1}<br>BEST: ROUND ${profile.best}<br>+${bolts} BOLTS · CORES +${xp.gain} XP` + xp.ups.map((u) => `<br><b>${esc(coreById(u.core).name)} LV ${u.to}!</b>${newSpecials(u)}`).join("");
       acts.innerHTML = `<button class="big" id="r-retry">TRY AGAIN</button><button class="big alt" id="r-ws2">WORKSHOP</button><button class="big alt" id="r-menu">MENU</button>`;
       $("#r-retry").onclick = () => startArcade(0);
       $("#r-ws2").onclick = () => go("workshop");
@@ -405,6 +437,11 @@ function endBattle() {
   }
   $("#r-menu").onclick = () => { leaveOnline(); B = null; renderTitle(); show("title"); };
   show("result");
+}
+
+function watchLine(got) {
+  const parts = got.map((g) => `${esc(byId(g.id)[g.slot].name)}`).join(", ");
+  return `<br>WATCH +${B.mySteps || 0} STEPS` + (parts ? ` · ASSEMBLED: <b>${parts}</b>` : "");
 }
 
 function newSpecials(u) {
@@ -429,10 +466,16 @@ function renderCollection() {
       ${spriteImg(full, 2, { smooth: true })}<b>${seen ? esc(r.name) : "???"}</b>
       <span class="pips">${SLOTS.map((s) => `<i class="${P.parts[s].includes(r.id) ? "on" : ""}"></i>`).join("")}</span><small>TIER ${r.tier}</small></button>`;
   }).join("");
-  $("#col-grid").querySelectorAll("[data-id]").forEach((b) => b.onclick = () => { COL = b.dataset.id; renderCollection(); });
+  $("#col-grid").querySelectorAll("[data-id]").forEach((b) => b.onclick = () => { COL = COL === b.dataset.id ? null : b.dataset.id; renderCollection(); });
   const det = $("#col-detail");
   const r = COL && byId(COL);
-  if (!r) { det.innerHTML = `<p class="hint">Pick a robot you've seen to look at its parts and buy the ones you're missing.</p>`; return; }
+  if (!r) {
+    det.innerHTML = `<p class="hint">Pick a robot you've seen to look at its parts and buy the ones you're missing.</p>
+      <div class="plate corep">CHIP SHOP · ${CHIP_PRICE} BOLTS EACH</div>` + CHIP_IDS.map((c) => `<div class="buyrow"><span><i class="gemdot ${c}"></i> <b>${esc(CHIPS[c].name)}</b><small>${esc(CHIPS[c].desc)}</small></span>
+      ${P.chips.includes(c) ? "<em>OWNED</em>" : `<button data-chipbuy="${c}" ${P.bolts < CHIP_PRICE ? "disabled" : ""}>BUY ${CHIP_PRICE}</button>`}</div>`).join("");
+    det.querySelectorAll("[data-chipbuy]").forEach((b) => b.onclick = () => { if (buyChip(profile, b.dataset.chipbuy)) { saveProfile(profile); sfx.unlock2(); renderCollection(); } });
+    return;
+  }
   const full = { head: r.id, rarm: r.id, larm: r.id, legs: r.id };
   det.innerHTML = `${spriteImg(full, 5, { smooth: true })}<div class="plate name">${esc(r.name)}</div>
     <p class="flavor">${esc(r.flavor || "")}</p>
@@ -442,8 +485,47 @@ function renderCollection() {
         ${has ? `<em>OWNED</em>` : `<button data-buy="${s}" ${P.bolts < price ? "disabled" : ""}>BUY ${price}</button>`}</div>`;
     }).join("")}`;
   det.querySelectorAll("[data-buy]").forEach((b) => b.onclick = () => {
+    if (b.dataset.buy === "chip") return;
     if (buyPart(profile, b.dataset.buy, r.id)) { saveProfile(profile); sfx.unlock2(); renderCollection(); }
   });
+}
+
+// ------------------------------------------------------------------ Bolt Watch (LCD toy nod)
+let WATCH_GAME = null;
+function renderWatch() {
+  const w = profile.watch, id = watchTarget(profile);
+  saveProfile(profile);
+  const lcd = $("#watch-lcd");
+  if (!id) { lcd.innerHTML = `<div class="lcd-msg">ALL ROBOTS<br>COMPLETE!</div>`; return; }
+  const r = byId(id);
+  const have = Object.fromEntries(SLOTS.map((s) => [s, profile.parts[s].includes(id)]));
+  // owned parts show as solid LCD pixels, missing ones as faint outlines
+  lcd.innerHTML = `<div class="lcd-bot">${spriteImg({ head: id, rarm: id, larm: id, legs: id }, 3, { smooth: true })}</div>
+    <div class="lcd-row">${SLOTS.map((s) => `<span class="${have[s] ? "on" : ""}">${PART_LABEL[s]}</span>`).join("")}</div>
+    <div class="lcd-row"><span>STEPS ${w.steps}/${WATCH_STEP}</span><span>ENERGY ${w.energy}</span></div>
+    <div class="lcd-bar"><i style="width:${Math.round(100 * w.steps / WATCH_STEP)}%"></i></div>
+    <div class="lcd-msg">${have.head && have.rarm && have.larm && have.legs ? "" : "MYSTERY ROBOT"} · BUILT ${w.done}</div>`;
+  $("#watch-oil").onclick = startOilGame;
+}
+
+function startOilGame() {
+  if (WATCH_GAME) return;
+  const bar = $("#oil-bar"), needle = $("#oil-needle");
+  bar.classList.remove("hidden");
+  let x = 0, dir = 1;
+  WATCH_GAME = setInterval(() => { x += dir * 3.2; if (x >= 100 || x <= 0) dir = -dir; needle.style.left = Math.max(0, Math.min(100, x)) + "%"; }, 16);
+  $("#watch-oil").textContent = "STOP!";
+  $("#watch-oil").onclick = () => {
+    clearInterval(WATCH_GAME); WATCH_GAME = null;
+    const quality = Math.max(0, 1 - Math.abs(x - 50) / 50);
+    watchRefuel(profile, quality);
+    saveProfile(profile);
+    $("#watch-note").textContent = quality > 0.85 ? "PERFECT OIL CHANGE!" : quality > 0.5 ? "GOOD OIL CHANGE" : "SLOPPY... BUT IT RUNS";
+    if (quality > 0.85) sfx.unlock2(); else sfx.pop();
+    $("#watch-oil").textContent = "OIL CHANGE";
+    setTimeout(() => bar.classList.add("hidden"), 600);
+    renderWatch();
+  };
 }
 
 // ------------------------------------------------------------------ arcade
@@ -464,7 +546,7 @@ function showReady(opts) {
   RD = { ...opts, sel: 0 };
   $("#ready-title").textContent = opts.title + (opts.rule === "all" ? " · KO ALL" : "") + (opts.field && opts.field !== "normal" ? " · " + FIELDS[opts.field].name : "");
   const stands = (team, flip, mine) => team.map((b, i) => `<button class="stand${i === 0 ? " lead" : ""}" ${mine ? `data-i="${i}"` : "disabled"} aria-label="${esc(b.name)}">
-      ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span></button>`).join("");
+      ${spriteImg(b, 2, { flip, smooth: true })}<i></i><span>${i === 0 ? "★" : ""}${esc(b.name)}</span><em class="grade g${terrainGrade(opts.field || "normal", byId(b.legs).body)}">${terrainGrade(opts.field || "normal", byId(b.legs).body)}</em></button>`).join("");
   $("#rd-mine").innerHTML = stands(opts.mine, false, true);
   $("#rd-foe").innerHTML = stands(opts.foe, true, false);
   $("#rd-mine").querySelectorAll("[data-i]").forEach((b) => {
@@ -487,10 +569,13 @@ function renderPortrait() {
   $("#rd-big").innerHTML = spriteImg(b, 6, { smooth: true });
   $("#rd-name").textContent = b.name;
   const lv = RD.versus ? MAX_CORE_LV : coreLvOf(profile, b.core);
-  $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(c.name)} LV ${lv}`;
+  $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(coreTitle(c, lv))} LV ${lv}`;
   $("#rd-stats").innerHTML = PARTS.map((p, i) => `<div><span>${PART_LABEL[p]}</span><b>${esc(parts[i].name)}</b></div>`).join("") +
     `<div><span>SPEED</span><b>${parts[3].speed}</b></div>` +
     `<div><span>SPECIALS</span><b>${(CORE_TREE[c.special] || []).filter((_, i) => lv >= TIER_LV[i]).map((x) => esc(SPECIALS[x].name)).join(", ")}</b></div>` +
+    `<div><span>TERRAIN</span><b>${terrainGrade(RD.field || "normal", byId(b.legs).body)} (${byId(b.legs).body.toUpperCase()} ON ${FIELDS[RD.field || "normal"].name})</b></div>` +
+    (b.chip ? `<div><span>CHIP</span><b>${esc(CHIPS[b.chip].name)}</b></div>` : "") +
+    (b.head === b.rarm && b.head === b.larm && b.head === b.legs ? `<div><span>FULL SET</span><b>CAN TRANSFORM</b></div>` : "") +
     (RD.rule === "all" ? `<div><span>RULE</span><b>KNOCK OUT ALL 3</b></div>` : "");
   $("#rd-mine").querySelectorAll(".stand").forEach((x, i) => x.classList.toggle("on", i === RD.sel));
 }
@@ -535,7 +620,7 @@ function onStatus(kind, info) {
 
 function validTeam(t) {
   return Array.isArray(t) && t.length === 3 && t.every((b) => b && PARTS.every((p) => byId(b[p])) && coreById(b.core))
-    ? t.map((b) => ({ head: b.head, rarm: b.rarm, larm: b.larm, legs: b.legs, core: b.core, name: String(b.name || byId(b.head).name).toUpperCase().slice(0, 10) }))
+    ? t.map((b) => ({ head: b.head, rarm: b.rarm, larm: b.larm, legs: b.legs, core: b.core, name: String(b.name || byId(b.head).name).toUpperCase().slice(0, 10), ...(CHIPS[b.chip] && Object.hasOwn(CHIPS, b.chip) ? { chip: b.chip } : {}) }))
     : null;
 }
 
@@ -548,8 +633,10 @@ function onMessage(m) {
   } else if (m.t === "cmd" && B && B.mode === "online") {
     const s = m.s === 0 || m.s === 1 ? m.s : -1;
     if (s !== 1 - B.me || ![0, 1, 2].includes(m.i) || !Number.isInteger(m.tick)) return;
-    const c = m.cmd && ["head", "rarm", "larm", "core", "wait"].includes(m.cmd.part) ? { part: m.cmd.part, target: [0, 1, 2].includes(m.cmd.target) ? m.cmd.target : null } : null;
+    const c = m.cmd && ["head", "rarm", "larm", "core", "wait", "transform"].includes(m.cmd.part) ? { part: m.cmd.part, target: [0, 1, 2].includes(m.cmd.target) ? m.cmd.target : null } : null;
     if (c && c.part === "core" && Object.hasOwn(SPECIALS, m.cmd.special)) c.special = m.cmd.special;
+    if (c && m.cmd.part === "transform") c.part = "transform";
+    if (c && PARTS.includes(m.cmd.aim)) c.aim = m.cmd.aim;
     B.remoteQ.push({ s, i: m.i, tick: m.tick, cmd: c });
   } else if (m.t === "hash" && B && B.mode === "online") {
     const mine = B.hashes[m.tick];
