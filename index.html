@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=17">
+  <link rel="stylesheet" href="css/style.css?v=18">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 </head>
 <body>
@@ -18,15 +18,18 @@
       <div class="logo"><span>BOLT</span><span>RUMBLE</span></div>
       <p class="tagline" id="tagline"></p>
       <div id="title-bots" class="title-bots"></div>
-      <nav class="menu">
-        <button class="big" data-go="arcade">▶ ARCADE LADDER</button>
-        <button class="big" data-go="online">▶ VS FRIEND ONLINE</button>
-        <button class="big" data-go="local">▶ VS ON THIS DEVICE</button>
-        <button class="big alt" data-go="workshop">WORKSHOP</button>
-        <button class="big alt" data-go="collection">COLLECTION &amp; SHOP</button>
-        <button class="big alt" data-go="watch">BOLT WATCH</button>
-        <button class="big alt" data-go="help">HOW TO PLAY</button>
-      </nav>
+      <div class="gbawin menuwin">
+        <nav class="menu" aria-label="Main menu">
+          <button class="mi" data-go="arcade" data-desc="Fight 20 rivals in a row on changing arenas. Win parts, chips and bolts.">ARCADE LADDER</button>
+          <button class="mi" data-go="online" data-desc="Make a room, send the 5-letter code, and rumble a friend on another device.">VS FRIEND ONLINE</button>
+          <button class="mi" data-go="local" data-desc="Two players on one screen. Every part is unlocked.">VS ON THIS DEVICE</button>
+          <button class="mi" data-go="workshop" data-desc="Build your team: heads, arms, legs, cores and chips.">WORKSHOP</button>
+          <button class="mi" data-go="collection" data-desc="See every robot you've met and spend bolts on parts and chips.">COLLECTION &amp; SHOP</button>
+          <button class="mi" data-go="watch" data-desc="A mystery robot builds itself from the steps you take in battle.">BOLT WATCH</button>
+          <button class="mi" data-go="help" data-desc="How battles, parts, cores and arenas work.">HOW TO PLAY</button>
+        </nav>
+      </div>
+      <div class="gbahelp" id="title-help">Pick a mode. Arrow keys move, Z or click selects.</div>
       <p class="stats" id="title-stats"></p>
     </section>
 
@@ -157,6 +160,6 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
-  <script type="module" src="js/ui.js?v=17"></script>
+  <script type="module" src="js/ui.js?v=18"></script>
 </body>
 </html>

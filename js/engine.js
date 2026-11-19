@@ -33,6 +33,15 @@ export const CORE_TREE = {
   overclock: ["overclock", "salvo", "burst"], focus: ["focus", "legcrash", "stop"], haste: ["haste", "stop", "drain"],
 };
 export const TIER_LV = [1, 8, 16];
+// Core personalities (the series' medal "aim" idea): how a core's robot fights on AUTO.
+export const PERSONALITY = {
+  burst: { name: "SHOOTER", desc: "loves shots, goes for the leader" },
+  shield: { name: "DEFENDER", desc: "guards and shields teammates" },
+  repair: { name: "MEDIC", desc: "repairs early, keeps the team alive" },
+  overclock: { name: "BERSERKER", desc: "strikes the weakest robot" },
+  focus: { name: "SNIPER", desc: "aims straight for heads" },
+  haste: { name: "INTERRUPTER", desc: "hits whoever is about to act" },
+};
 
 // Arena terrain: each field bends the rules a little (idea from the series' terrain effects).
 export const FIELDS = {
@@ -518,7 +527,9 @@ export function aiCommand(state, side, idx, level = 3) {
   const foes = living(foe);
   const roll = () => rand(state);
   const acts = actionsFor(state, side, idx);
-  const hurt = living(me).filter((x) => PARTS.some((p) => x.parts[p].hp > 0 && x.parts[p].hp < x.parts[p].max * 0.5));
+  const persona = u.core.special;
+  const hurtLine = persona === "repair" ? 0.7 : 0.5;
+  const hurt = living(me).filter((x) => PARTS.some((p) => x.parts[p].hp > 0 && x.parts[p].hp < x.parts[p].max * hurtLine));
   if (acts.some((a) => a.part === "transform") && roll() < 0.35) return { part: "transform", target: null };
   const cores = acts.filter((a) => a.part === "core");
   if (cores.length) {
@@ -531,26 +542,30 @@ export function aiCommand(state, side, idx, level = 3) {
   const rep = acts.find((a) => a.kind === "repair");
   if (rep && hurt.length) return { part: rep.part, target: hurt[0].idx };
   const shd = acts.find((a) => a.kind === "shield");
-  if (shd && roll() < 0.3) return { part: shd.part, target: 0 };
+  if (shd && roll() < (persona === "shield" ? 0.55 : 0.3)) return { part: shd.part, target: 0 };
   const scn = acts.find((a) => a.kind === "scan");
   if (scn && me.scan === 0 && roll() < 0.35) return { part: scn.part, target: null };
   const grd = acts.find((a) => a.kind === "guard");
-  if (grd && idx !== 0 && !me.units[0].down && me.units[0].st.guardedBy === null && roll() < 0.3) return { part: grd.part, target: 0 };
+  if (grd && idx !== 0 && !me.units[0].down && me.units[0].st.guardedBy === null && roll() < (persona === "shield" ? 0.6 : 0.3)) return { part: grd.part, target: 0 };
   const atk = acts.filter((a) => ["shoot", "strike", "beam", "laser", "missile"].includes(a.kind));
   if (!atk.length) return { part: acts[0].part, target: acts[0].targets[0] };
-  const target = leaderOr(foe, foes, roll, level);
+  let target = leaderOr(foe, foes, roll, level);
+  if (persona === "burst" && !foe.units[0].down) target = 0;
+  if (persona === "overclock") target = [...foes].sort((a, b) => PARTS.reduce((x, p) => x + a.parts[p].hp, 0) - PARTS.reduce((x, p) => x + b.parts[p].hp, 0))[0].idx;
+  if (persona === "haste") { const soon = [...foes].filter((f) => f.phase === "charge").sort((a, b) => b.pos - a.pos)[0]; if (soon) target = soon.idx; }
   const tUnit = foe.units[target];
+  const likes = persona === "burst" ? ["shoot", "missile"] : persona === "overclock" ? ["strike"] : persona === "focus" ? ["laser", "beam"] : [];
   let best = null, bestV = -1;
   for (const a of atk) {
     const p = u.parts[a.part];
     const pw = a.kind === "missile" ? p.power * 0.6 * foes.length : p.power;
-    const v = pw * hitChance(state, u, p, a.kind, tUnit) * (a.part === "head" ? 0.9 : 1) * (CHARGE_MULT[a.kind] || 1) + roll() * 5;
+    const v = pw * hitChance(state, u, p, a.kind, tUnit) * (a.part === "head" ? 0.9 : 1) * (CHARGE_MULT[a.kind] || 1) * (likes.includes(a.kind) ? 1.4 : 1) + roll() * 5;
     if (v > bestV) { bestV = v; best = a; }
   }
   let aim;
   if (subSkills(u.parts[best.part]).includes("snipe") && level >= 3) {
     const x = roll();
-    aim = tUnit.parts.head.hp <= u.parts[best.part].power * 0.5 || x < 0.3 ? "head" : x < 0.65 && intact(tUnit, "legs") ? "legs" : undefined;
+    aim = tUnit.parts.head.hp <= u.parts[best.part].power * 0.5 || x < (persona === "focus" ? 0.7 : 0.3) ? "head" : x < 0.75 && intact(tUnit, "legs") ? "legs" : undefined;
   }
   return { part: best.part, target: best.kind === "missile" ? null : target, aim };
 }

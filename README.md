@@ -16,6 +16,8 @@ An 8-bit robot battler you play in the browser. Snap on parts, charge your core,
 - **Spoils**: win a part from every rival you beat. Bosses hand over a whole robot.
 - **Collection and shop**: an album of all robots, and bolts to buy parts and chips.
 - **Bolt Watch**: a mystery robot that assembles itself from the steps your robots take in battle.
+- **Personalities**: each core fights in its own style (Shooter, Defender, Medic, Berserker, Sniper, Interrupter). Enemy robots and the AUTO button follow it.
+- **Animation**: every body part moves on its own. Robots breathe, swing their arms while walking, lean in to aim, recoil and thrust when they attack, and lose broken arms and legs. On a KO their head and arms fly off.
 
 ## How a battle works
 Each team has three robots. The ★ leader stands in the middle, and if its head breaks, that team loses. A robot waits on its command line until you give it an order. Then it walks to the centre while charging, does its move, and walks back to cool down. Faster legs walk faster. Every part has its own armor: broken arms can't be used, broken legs slow you down, and a broken head knocks the robot out.
@@ -37,7 +39,7 @@ These run 1,500+ simulated battles and check: no crashes, sensible battle length
 
 ## Tech
 - `js/engine.js`: deterministic real-time battle engine (no DOM).
-- `js/pixel.js`: hand-drawn pixel part templates, composited into 32×32 robots with a 15-bit palette.
+- `js/pixel.js`: hand-drawn pixel part templates, composited into 32×32 robots with a 15-bit palette, or split into per-part layers for animation.
 - `js/scene.js`: 240×160 canvas battle scene with effects.
 - `js/ui.js`: menus, workshop, battle controller, arcade and versus modes.
 - `js/net.js`: online play over WebRTC via [PeerJS](https://peerjs.com/). Its public broker only introduces the two players; the match data then goes directly between them.

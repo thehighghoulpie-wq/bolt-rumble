@@ -1,10 +1,10 @@
-import { DATA } from "./data.js?v=17";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform } from "./engine.js?v=17";
-import { spriteImg, spriteURL } from "./pixel.js?v=17";
-import { Scene, W, H, hexField } from "./scene.js?v=17";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=17";
-import { Link, makeCode } from "./net.js?v=17";
-import { sfx } from "./sfx.js?v=17";
+import { DATA } from "./data.js?v=18";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=18";
+import { spriteImg, spriteURL } from "./pixel.js?v=18";
+import { Scene, W, H, hexField } from "./scene.js?v=18";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=18";
+import { Link, makeCode } from "./net.js?v=18";
+import { sfx } from "./sfx.js?v=18";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -103,7 +103,7 @@ function renderWorkshop() {
     const tierCls = lv >= 16 ? "gold" : lv >= 8 ? "silver" : "bronze";
     return `<button class="chip core ${b.core === c.id ? "on" : ""}" data-core="${c.id}"><i class="dot ${tierCls}" style="background:${c.color}"></i><span><b>${esc(coreTitle(c, lv))} <em>LV ${lv}</em></b>
       <small>${(CORE_TREE[c.special] || []).map((sp, i) => lv >= TIER_LV[i] ? esc(SPECIALS[sp].name) : `<s>${esc(SPECIALS[sp].name)} LV${TIER_LV[i]}</s>`).join(" · ")}</small>
-      <small class="hint">BOOSTS ${(AFFINITY[c.special] || []).map((k) => KIND_TEXT[k]).join(" + ")}</small></span></button>`;
+      <small class="hint">BOOSTS ${(AFFINITY[c.special] || []).map((k) => KIND_TEXT[k]).join(" + ")} · ${(PERSONALITY[c.special] || {}).name || ""}</small></span></button>`;
   }).join("") + `</div>`;
   const chipPool = WS.levels ? profile.chips : CHIP_IDS;
   html += `<h4>CHIP <small>${chipPool.length}/${CHIP_IDS.length}</small></h4><div class="chips">` +
@@ -233,45 +233,74 @@ function renderCmd() {
   const box = $("#b-cmd");
   box.classList.remove("hidden");
   const tag = B.mode === "local" ? `<em class="tag p${s + 1}">${sideTag(s)}</em>` : "";
+  const bars = (x) => PARTS.map((p) => {
+    const q = x.parts[p], pct = Math.round(100 * q.hp / q.max);
+    return `<div class="ib"><span>${PART_LABEL[p]}</span><i><b style="width:${pct}%" class="${q.hp <= 0 ? "out" : pct < 40 ? "low" : ""}"></b></i><span>${q.hp}</span></div>`;
+  }).join("");
+  // GBA-style window: a list with a cursor on the left, details of the highlighted item on the right
+  const frame = (title, items, infos, footer) => {
+    box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b>${i === 0 ? " ★" : ""} <span class="crumb">${title}</span></div>
+      <div class="cmdbody"><div class="cmdlist">${items}</div><div class="cmdinfo" id="cmd-info"></div></div>
+      <div class="row2">${footer}</div>`;
+    const info = $("#cmd-info");
+    box.querySelectorAll(".mi").forEach((b, n) => {
+      const show = () => { info.innerHTML = infos[n] || ""; box.querySelectorAll(".mi.sel").forEach((x) => x.classList.remove("sel")); b.classList.add("sel"); };
+      b.addEventListener("focus", show);
+      b.addEventListener("mouseenter", () => b.focus({ preventScroll: true }));
+    });
+    const first = box.querySelector(".mi");
+    if (first) { first.focus({ preventScroll: true }); info.innerHTML = infos[0] || ""; first.classList.add("sel"); }
+  };
+
   if (B.target && B.target.aimFor !== undefined) {
     const t = B.target, foe = B.state.sides[t.side].units[t.aimFor];
-    box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b> ▶ ${esc(t.label)} ▶ ${esc(foe.name)} · SNIPE WHICH PART?</div>
-      <div class="opts">${PARTS.filter((x) => foe.parts[x].hp > 0).map((x) => `<button class="opt" data-aim="${x}"><span><b>${PART_LABEL[x]}</b><small>${foe.parts[x].hp}/${foe.parts[x].max} ARMOR${x === "head" ? " · HARDER TO HIT" : ""}</small></span></button>`).join("")}
-      <button class="opt" data-aim=""><span><b>ANY PART</b><small>normal shot</small></span></button></div>
-      <div class="row2"><button id="c-back">◀ BACK</button></div>`;
+    const opts = PARTS.filter((x) => foe.parts[x].hp > 0);
+    frame(`▶ ${esc(t.label)} ▶ ${esc(foe.name)} · SNIPE WHICH PART?`,
+      opts.map((x) => `<button class="mi" data-aim="${x}">${PART_LABEL[x]}</button>`).join("") + `<button class="mi" data-aim="">ANY PART</button>`,
+      [...opts.map((x) => `<b>${PART_LABEL[x]}: ${esc(foe.parts[x].name)}</b><br>ARMOR ${foe.parts[x].hp}/${foe.parts[x].max}<br>${x === "head" ? "BREAK IT TO KNOCK THEM OUT. HARDER TO HIT." : x === "legs" ? "BROKEN LEGS: SLOW AND EASY TO HIT." : "BROKEN ARMS CAN'T BE USED."}`), "<b>ANY PART</b><br>A normal shot at a random part."],
+      `<button id="c-back">◀ BACK</button>`);
     box.querySelectorAll("[data-aim]").forEach((b) => b.onclick = () => issue({ part: t.part, target: t.aimFor, aim: b.dataset.aim || undefined }));
-    box.querySelector("[data-aim]")?.focus({ preventScroll: true });
     $("#c-back").onclick = () => { delete B.target.aimFor; renderCmd(); };
     return;
   }
   if (B.target) {
     const t = B.target;
     const units = B.state.sides[t.side].units;
-    box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b> ▶ ${esc(t.label)} · CHOOSE TARGET</div>
-      <div class="opts">${t.list.map((x) => `<button class="opt" data-t="${x}">${spriteImg(units[x].build, 1, { flip: t.side !== B.me })}<span><b>${esc(units[x].name)}</b><small>HEAD ${units[x].parts.head.hp}/${units[x].parts.head.max}${x === 0 ? " · LEADER" : ""}</small></span></button>`).join("")}</div>
-      <div class="row2"><button id="c-back">◀ BACK</button></div>`;
+    frame(`▶ ${esc(t.label)} · CHOOSE TARGET`,
+      t.list.map((x) => `<button class="mi" data-t="${x}">${x === 0 ? "★" : ""}${esc(units[x].name)}</button>`).join(""),
+      t.list.map((x) => `${spriteImg(units[x].build, 2, { flip: t.side !== B.me, smooth: true })}<b>${esc(units[x].name)}</b>${x === 0 ? " · LEADER" : ""}${bars(units[x])}`),
+      `<button id="c-back">◀ BACK</button>`);
     box.querySelectorAll("[data-t]").forEach((b) => {
       b.onclick = () => (t.snipe ? (B.target.aimFor = +b.dataset.t, renderCmd()) : issue({ part: t.part, special: t.special, target: +b.dataset.t }));
-      b.onmouseenter = b.onfocus = () => { scene.cursor = [t.side, +b.dataset.t]; };
+      b.addEventListener("focus", () => { scene.cursor = [t.side, +b.dataset.t]; });
     });
     scene.cursor = [t.side, t.list[0]];
-    box.querySelector("[data-t]")?.focus({ preventScroll: true });
     $("#c-back").onclick = () => { B.target = null; scene.cursor = null; renderCmd(); };
     return;
   }
   const acts = actionsFor(B.state, s, i);
-  box.innerHTML = `<div class="cmdhead">${tag}${spriteImg(u.build, 1)}<b>${esc(u.name)}</b>${i === 0 ? " ★" : ""} · WHAT'S THE MOVE?</div>
-    <div class="opts">${acts.map((a, n) => {
-      if (a.part === "transform") return `<button class="opt core transform" data-n="${n}"><span><b>⚡ TRANSFORM</b><small>full set: faster, hits are shared by the whole body</small></span></button>`;
-      if (a.part === "core") return `<button class="opt core" data-n="${n}"><span><b>★ ${esc(SPECIALS[a.special].name)}</b><small>${esc(SPECIALS[a.special].desc)}</small></span></button>`;
-      if (a.part === "wait") return `<button class="opt" data-n="${n}"><span><b>WAIT</b><small>no usable parts</small></span></button>`;
+  const items = [], infos = [];
+  acts.forEach((a, n) => {
+    if (a.part === "transform") {
+      items.push(`<button class="mi special" data-n="${n}">⚡ TRANSFORM</button>`);
+      infos.push(`<b>TRANSFORM</b><br>FULL SET ONLY · COSTS 50 CORE<br>Moves 15% faster for 4 moves, and every hit is shared by the whole body.`);
+    } else if (a.part === "core") {
+      items.push(`<button class="mi special" data-n="${n}">★ ${esc(SPECIALS[a.special].name)}</button>`);
+      infos.push(`<b>${esc(SPECIALS[a.special].name)}</b><br>CORE SPECIAL · USES THE FULL CORE<br>${esc(SPECIALS[a.special].desc)}`);
+    } else if (a.part === "wait") {
+      items.push(`<button class="mi" data-n="${n}">WAIT</button>`);
+      infos.push("No usable parts left.");
+    } else {
       const q = u.parts[a.part];
-      const meta = [PART_LABEL[a.part], KIND_TEXT[a.kind]];
-      if (q.power) meta.push("PWR " + q.power);
-      if (a.part === "head") meta.push(q.usesLeft + " LEFT");
-      return `<button class="opt" data-n="${n}"><span><b>${esc(q.name)}</b><small>${meta.join(" · ")}</small><small class="hint">${KIND_HINT[a.kind] || ""}</small>${subTags(q)}</span></button>`;
-    }).join("")}</div>
-    <div class="row2"><button id="c-auto">AUTO</button></div>`;
+      items.push(`<button class="mi" data-n="${n}">${PART_LABEL[a.part]} ${esc(q.name)}</button>`);
+      const stats = [KIND_TEXT[a.kind]];
+      if (q.power) stats.push("PWR " + q.power);
+      if (q.accuracy) stats.push("AIM " + q.accuracy);
+      if (a.part === "head") stats.push(q.usesLeft + " USES LEFT");
+      infos.push(`<b>${esc(q.name)}</b> <small>(${PART_LABEL[a.part]} ${q.hp}/${q.max})</small><br>${stats.join(" · ")}<br>${KIND_HINT[a.kind] || ""}<br>${subTags(q)}`);
+    }
+  });
+  frame("· WHAT'S THE MOVE?", items.join(""), infos, `<button id="c-auto">AUTO (${esc((PERSONALITY[u.core.special] || {}).name || "AI")})</button>`);
   box.querySelectorAll("[data-n]").forEach((b) => b.onclick = () => {
     const a = acts[+b.dataset.n];
     if (a.targets[0] === null) return issue({ part: a.part, special: a.special, target: null });
@@ -281,7 +310,6 @@ function renderCmd() {
     renderCmd();
   });
   $("#c-auto").onclick = () => issue(aiCommand(clone(B.state), s, i, 3));
-  box.querySelector("[data-n]")?.focus({ preventScroll: true });
 }
 
 function issue(cmd) {
@@ -572,6 +600,7 @@ function renderPortrait() {
   $("#rd-core").innerHTML = `<i class="dot" style="background:${c.color}"></i>${esc(coreTitle(c, lv))} LV ${lv}`;
   $("#rd-stats").innerHTML = PARTS.map((p, i) => `<div><span>${PART_LABEL[p]}</span><b>${esc(parts[i].name)}</b></div>`).join("") +
     `<div><span>SPEED</span><b>${parts[3].speed}</b></div>` +
+    `<div><span>STYLE</span><b>${(PERSONALITY[c.special] || {}).name || ""}: ${esc((PERSONALITY[c.special] || {}).desc || "")}</b></div>` +
     `<div><span>SPECIALS</span><b>${(CORE_TREE[c.special] || []).filter((_, i) => lv >= TIER_LV[i]).map((x) => esc(SPECIALS[x].name)).join(", ")}</b></div>` +
     `<div><span>TERRAIN</span><b>${terrainGrade(RD.field || "normal", byId(b.legs).body)} (${byId(b.legs).body.toUpperCase()} ON ${FIELDS[RD.field || "normal"].name})</b></div>` +
     (b.chip ? `<div><span>CHIP</span><b>${esc(CHIPS[b.chip].name)}</b></div>` : "") +
@@ -705,6 +734,20 @@ document.addEventListener("keydown", (e) => {
   } else if (k === "x" || k === "X" || k === "Escape") {
     scope.querySelector("#c-back, [data-back], #ready-back")?.click();
   }
+});
+
+// ------------------------------------------------------------------ GBA-style menus: cursor follows mouse and keys, help box explains
+document.addEventListener("focusin", (e) => {
+  const b = e.target.closest(".mi");
+  if (!b) return;
+  b.parentElement.querySelectorAll(".mi.sel").forEach((x) => x.classList.remove("sel"));
+  b.classList.add("sel");
+  const help = b.closest(".screen")?.querySelector(".gbahelp");
+  if (help && b.dataset.desc) help.textContent = b.dataset.desc;
+});
+document.addEventListener("mouseover", (e) => {
+  const b = e.target.closest(".menu .mi, .gbalist .mi");
+  if (b && document.activeElement !== b) b.focus({ preventScroll: true });
 });
 
 // ------------------------------------------------------------------ sound: blips on buttons + a mute toggle

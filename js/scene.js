@@ -1,7 +1,7 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=17";
-import { PARTS } from "./engine.js?v=17";
-import { sfx } from "./sfx.js?v=17";
+import { sprite, layers, drawText, textWidth } from "./pixel.js?v=18";
+import { PARTS } from "./engine.js?v=18";
+import { sfx } from "./sfx.js?v=18";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -155,6 +155,7 @@ export class Scene {
       }
       if (e.t === "attack") {
         const src = U(e.src), dst = U(e.dst);
+        this.v(src).act = { kind: e.kind, part: e.part, t: 0 };
         const impact = () => this.impact(dst, e);
         if (e.aimed || e.part && e.kind === "laser" && e.aimed) this.fx.push({ kind: "scope", u: dst, t: 0, dur: 16 });
         if (delay === 0) ({ strike: () => sfx.strike(), beam: () => sfx.beam(), burst: () => sfx.beam(), laser: () => sfx.laser(), missile: () => sfx.missile() }[e.kind] || (() => sfx.shoot()))();
@@ -167,6 +168,7 @@ export class Scene {
         delay += 6;
       } else if (e.t === "repair") {
         const d = U(e.dst);
+        if (e.src) this.v(U(e.src)).act = { kind: "support", part: e.part, t: 0 };
         for (let i = 0; i < 10; i++) this.fx.push({ kind: "plus", x: this.center(d)[0] + rnd(-10, 10), y: this.center(d)[1] + rnd(-6, 10), vy: -rnd(0.3, 0.8), t: -i * 2, dur: 34 });
         this.text(d, "+" + e.amount, "#5cff9a", 6);
         sfx.chime();
@@ -174,12 +176,15 @@ export class Scene {
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#7fd0ff", t: 0, dur: 30 });
         sfx.shield();
       } else if (e.t === "scan") {
+        this.v(U(e.src)).act = { kind: "support", part: "head", t: 0 };
         this.fx.push({ kind: "scan", u: U(e.src), t: 0, dur: 40 });
         sfx.scan();
       } else if (e.t === "guard") {
+        this.v(U(e.src)).act = { kind: "guard", part: "larm", t: 0 };
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#ffd23f", t: 0, dur: 24 });
         sfx.land();
       } else if (e.t === "core") {
+        this.v(U(e.src)).act = { kind: "core", part: "core", t: 0 };
         this.flashT = 10;
         sfx.riser();
         const s = U(e.src);
@@ -187,9 +192,10 @@ export class Scene {
       } else if (e.t === "down") {
         const d = U(e.dst);
         this.slowmo = e.leader ? 90 : 50;
-        setTimeout(() => { this.explode(d); sfx.explode(); }, 260);
+        setTimeout(() => { this.explode(d); this.fallApart(d); sfx.explode(); }, 260);
       } else if (e.t === "transform") {
         const u = U(e.src);
+        this.v(u).act = { kind: "core", part: "core", t: 0 };
         this.flashT = 8; this.shakeT = Math.max(this.shakeT, 8);
         this.fx.push({ kind: "ring", u, col: "#f8d838", t: 0, dur: 30 });
         this.fx.push({ kind: "ring", u, col: "#ffffff", t: -6, dur: 30 });
@@ -215,6 +221,8 @@ export class Scene {
   impact(dst, e) {
     const v = this.v(dst);
     const [cx, cy] = this.center(dst);
+    if (e.hit) v.hit = { part: e.hitPart || "torso", t: 0 };
+    if (e.hit && e.broke && e.hitPart && e.hitPart !== "head") this.dropPart(dst, e.hitPart);
     if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.lunge = 0; sfx.miss(); return; }
     if (e.crit) sfx.crit(); else sfx.hit(e.dmg >= 20 || e.kind === "strike");
     if (e.broke) setTimeout(() => sfx.break(), 90);
@@ -261,6 +269,32 @@ export class Scene {
     c.classList.remove("punch"); void c.offsetWidth; c.classList.add("punch");
     setTimeout(() => c.classList.remove("punch"), 220);
   }
+  // a broken arm or legs drops off and clatters on the floor
+  dropPart(u, part) {
+    const L = layers(u.build, { broken: { head: true, rarm: true, larm: true, legs: true } });
+    const lay = L.find((l) => l.name === part);
+    if (!lay) return;
+    const [x, y] = this.unitXY(u);
+    const left = this.col(u.side) === 0;
+    const px = left ? x - 16 + lay.x : x + 16 - lay.x - lay.c.width;
+    this.fx.push({ kind: "piece", c: lay.c, x: px, y: y - 31 + lay.y, vx: (left ? -1 : 1) * rnd(0.6, 1.4), vy: rnd(-2.2, -1.4), floor: y + 2 - lay.c.height, flip: !left, t: 0, dur: 150 });
+  }
+  // knocked out: head and arms fly off, the rest slumps
+  fallApart(u) {
+    const v = this.v(u);
+    if (v.apart) return;
+    v.apart = true;
+    const L = layers(u.build, { broken: { head: true, rarm: true, larm: true, legs: true } });
+    const [x, y] = this.unitXY(u);
+    const left = this.col(u.side) === 0;
+    for (const lay of L) {
+      if (lay.name === "legs" || lay.name === "torso") continue;
+      const px = left ? x - 16 + lay.x : x + 16 - lay.x - lay.c.width;
+      const dir = lay.name === "head" ? (left ? -1 : 1) * rnd(0.3, 0.9) : (lay.name === "rarm" ? 1 : -1) * (left ? 1 : -1) * rnd(0.8, 1.8);
+      this.fx.push({ kind: "piece", c: lay.c, x: px, y: y - 31 + lay.y, vx: dir, vy: lay.name === "head" ? rnd(-3.6, -2.8) : rnd(-2.6, -1.6), floor: y + 2 - lay.c.height, flip: !left, t: 0, dur: 600 });
+    }
+  }
+
   explode(u) {
     const [cx, cy] = this.center(u);
     this.shakeT = 16; this.flashT = 4; this.freeze = 10;
@@ -323,6 +357,64 @@ export class Scene {
     drawText(g, word, Math.round(120 - w / 2), Math.round(70 - sc * 2.5), "#f8d838", "#6a2a00", Math.round(sc));
   }
 
+  // per-part offsets (in the robot's own facing direction: +x is forward, +y is down)
+  pose(u, v, moving, frame, broken) {
+    const P = { head: [0, 0], torso: [0, 0], rarm: [0, 0], larm: [0, 0], legs: [0, 0] };
+    const add = (k, dx, dy) => { P[k][0] += dx; P[k][1] += dy; };
+    const upper = (dx, dy) => { add("head", dx, dy); add("torso", dx, dy); add("rarm", dx, dy); add("larm", dx, dy); };
+    if (u.down) { // slumped wreck
+      add("torso", -1, 5); add("head", -1, 5); add("rarm", 0, 7); add("larm", 0, 7); add("legs", 0, 2);
+      return P;
+    }
+    // breathing when standing still
+    if (!moving) { const b = Math.floor((this.t + u.idx * 13 + u.side * 7) / 22) % 2; upper(0, b); add("head", 0, b ? 0 : 0); }
+    // walking: body bobs, arms swing against the legs
+    if (moving) {
+      upper(0, frame ? -1 : 0);
+      add("rarm", frame ? 1 : -1, 0); add("larm", frame ? -1 : 1, 0);
+      add("head", 0, frame ? 0 : 1);
+    }
+    // charging: lean forward and ready the chosen weapon
+    if (u.phase === "charge" && u.cmd) {
+      upper(1, 0);
+      const part = u.cmd.part;
+      if (part === "rarm") add("rarm", 2, -2);
+      else if (part === "larm") add("larm", 2, -2);
+      else if (part === "head") add("head", 1, -1);
+      else if (part === "core" || part === "transform") { add("rarm", 0, -2); add("larm", 0, -2); }
+    }
+    // acting
+    const a = v.act;
+    if (a) {
+      a.t++;
+      const arm = a.part === "larm" ? "larm" : "rarm";
+      if (a.kind === "shoot") { if (a.t < 14) add(arm, a.t % 4 < 2 ? -2 : 1, a.t % 4 < 2 ? 0 : -1); }
+      else if (a.kind === "beam" || a.kind === "burst") { if (a.t < 18) { add(arm, 2, -1); upper(a.t % 2 ? -1 : 0, 0); } }
+      else if (a.kind === "strike") { if (a.t > 6 && a.t < 20) add(arm, 5, -1); if (a.t < 6) add(arm, -2, 0); }
+      else if (a.kind === "laser" || a.kind === "missile" || a.part === "head") { if (a.t < 14) { add("head", 1, -2); add("torso", 0, -1); } }
+      else if (a.kind === "support" || a.kind === "guard") { if (a.t < 22) add(a.kind === "guard" ? "larm" : arm, 2, -3); }
+      else if (a.kind === "core") { if (a.t < 26) { add("rarm", 0, -4); add("larm", 0, -4); upper(0, -1); } }
+      if (a.t > 30) v.act = null;
+    }
+    // getting hit: knocked back, the hit part jolts
+    if (v.hit) {
+      v.hit.t++;
+      if (v.hit.t < 6) { upper(-2, 0); add(v.hit.part === "torso" ? "torso" : v.hit.part, -1, -1); }
+      else if (v.hit.t < 10) upper(-1, 0);
+      if (v.hit.t > 12) v.hit = null;
+    }
+    // broken parts hang limp; broken legs drop the body
+    if (broken.rarm) add("rarm", -1, 3);
+    if (broken.larm) add("larm", -1, 3);
+    if (broken.legs) { upper(0, 3); add("legs", 0, 1); }
+    // victory cheer
+    if (this.state && this.state.winner === u.side) {
+      const up = Math.floor(this.t / 10) % 2;
+      add("rarm", 0, up ? -5 : -2); add("larm", 0, up ? -2 : -5); upper(0, up ? -1 : 0);
+    }
+    return P;
+  }
+
   drawUnit(g, u) {
     const v = this.v(u);
     const [x0, y] = this.unitXY(u);
@@ -336,16 +428,24 @@ export class Scene {
     const bob = hover ? Math.round(Math.sin(this.t / 9 + u.idx) * 1.5) - 2 : moving && frame ? -1 : 0;
     const broken = { head: u.parts.head.hp <= 0, rarm: u.parts.rarm.hp <= 0, larm: u.parts.larm.hp <= 0, legs: u.parts.legs.hp <= 0 };
     if (u.down) { broken.head = broken.rarm = broken.larm = broken.legs = true; v.deadT++; }
-    const sp = sprite(u.build, { frame, broken, flash: v.flash > 0 && v.flash % 2 === 0 });
+    const hitFlash = v.hit && v.hit.t < 8 && v.hit.t % 2 === 0 ? v.hit.part : null;
+    const flashPart = hitFlash || (v.flash > 0 && v.flash % 2 === 0 ? "all" : null);
     if (v.flash > 0) v.flash--;
     if (v.shake > 0) v.shake--;
+    const L = layers(u.build, { frame, broken, flashPart });
+    const pose = this.pose(u, v, moving, frame, broken);
     const left = this.col(u.side) === 0;
     const facingRight = left ? u.phase !== "cool" || u.down : u.phase === "cool" && !u.down;
+    const top = y - 31 + bob + this.dropOffset(u, x, y);
     g.save();
-    if (u.down) g.globalAlpha = 0.75;
-    const dy = y - 31 + bob + (u.down ? 3 : 0) + this.dropOffset(u, x, y);
-    if (facingRight) g.drawImage(sp, x - 16, dy);
-    else { g.translate(x + 16, dy); g.scale(-1, 1); g.drawImage(sp, 0, 0); }
+    if (u.down) g.globalAlpha = 0.8;
+    for (const lay of L) {
+      if (u.down && v.apart && (lay.name === "head" || lay.name === "rarm" || lay.name === "larm")) continue;
+      const [dx, dy] = pose[lay.name] || [0, 0];
+      const ly = top + lay.y + dy;
+      if (facingRight) g.drawImage(lay.c, x - 16 + lay.x + dx, ly);
+      else { g.save(); g.translate(x + 16 - lay.x - dx, ly); g.scale(-1, 1); g.drawImage(lay.c, 0, 0); g.restore(); }
+    }
     g.restore();
     // status: shields, guard, haste trail
     const side = this.state.sides[u.side];
@@ -485,6 +585,16 @@ export class Scene {
           g.strokeStyle = f.col; g.lineWidth = 1; g.globalAlpha = 1 - p;
           g.strokeRect(Math.round(cx - r) + 0.5, Math.round(cy - r) + 0.5, Math.round(r * 2), Math.round(r * 2));
           g.globalAlpha = 1;
+          break;
+        }
+        case "piece": {
+          if (f.y < f.floor || f.vy < 0) { f.vy += 0.18; f.x += f.vx; f.y += f.vy; }
+          if (f.y >= f.floor && f.vy >= 0) { f.y = f.floor; if (Math.abs(f.vy) > 0.6) { f.vy *= -0.35; f.vx *= 0.6; } else { f.vy = 0; f.vx = 0; } }
+          if (f.dur - f.t < 40 && f.t % 4 < 2) break; // blink out
+          g.save();
+          if (f.flip) { g.translate(Math.round(f.x) + f.c.width, Math.round(f.y)); g.scale(-1, 1); g.drawImage(f.c, 0, 0); }
+          else g.drawImage(f.c, Math.round(f.x), Math.round(f.y));
+          g.restore();
           break;
         }
         case "scope": {

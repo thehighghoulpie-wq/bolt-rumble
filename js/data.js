@@ -296,27 +296,27 @@ export const DATA = {
     "name": "Siren Top",
     "kind": "missile",
     "armor": 35,
-    "power": 18,
+    "power": 21,
     "uses": 3
    },
    "rarm": {
     "name": "Rocket Pipe",
     "kind": "shoot",
     "armor": 45,
-    "power": 22,
-    "accuracy": 60
+    "power": 26,
+    "accuracy": 65
    },
    "larm": {
     "name": "Rivet Gun",
     "kind": "shoot",
     "armor": 40,
-    "power": 14,
-    "accuracy": 70
+    "power": 17,
+    "accuracy": 75
    },
    "legs": {
     "name": "Rust Tracks",
     "armor": 70,
-    "speed": 25,
+    "speed": 31,
     "evasion": 5
    }
   },

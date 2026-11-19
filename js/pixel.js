@@ -1,7 +1,7 @@
 // 8-bit sprite kit: hand-drawn part templates, palettes, composited 32x32 robots.
 // Keys: . clear  o outline  m main  M main dark  l main light  a accent  A accent dark
 //       e eye/glow  w white  g metal  G dark metal
-import { DATA } from "./data.js?v=17";
+import { DATA } from "./data.js?v=18";
 
 const HEADS = {
   dome: [
@@ -354,6 +354,37 @@ export function sprite(build, opts = {}) {
   blit(ctx, ARMS[RA.rarm.kind] || ARMS.shoot, 19, 13, palette(RA.colors, broken.rarm), flash);
   cache.set(key, c);
   return c;
+}
+
+// Layered robot: every body part is its own little canvas so it can move on its own.
+// Returns the parts in draw order with their resting spot inside the 32x32 frame.
+const layerCache = new Map();
+function partCanvas(rows, pal, flash) {
+  const w = Math.max(...rows.map((r) => r.length)), h = rows.length;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  blit(c.getContext("2d"), rows, 0, 0, pal, flash);
+  return c;
+}
+export function layers(build, opts = {}) {
+  const { frame = 0, broken = {}, flashPart = null } = opts;
+  const key = [build.head, build.rarm, build.larm, build.legs, +!!broken.head, +!!broken.rarm, +!!broken.larm, +!!broken.legs, frame, flashPart || ""].join("|");
+  let out = layerCache.get(key);
+  if (out) return out;
+  const H = byId(build.head), RA = byId(build.rarm), LA = byId(build.larm), L = byId(build.legs);
+  const legsT = LEGS[L.body] || LEGS.biped;
+  const legRows = legsT[frame % legsT.length];
+  const fl = (p) => flashPart === "all" || flashPart === p;
+  const head = HEADS[headStyleOf(build.head)];
+  out = [
+    { name: "larm", c: partCanvas(ARMS[LA.larm.kind] || ARMS.shoot, palette(LA.colors, broken.larm, 0.72), fl("larm")), x: 5, y: 13 },
+    { name: "legs", c: partCanvas(legRows, palette(L.colors, broken.legs), fl("legs")), x: 6, y: 31 - legRows.length + 1 },
+    { name: "torso", c: partCanvas(TORSO, palette(H.colors, broken.head), fl("head") || fl("torso")), x: 10, y: 12 },
+    { name: "head", c: partCanvas(head, palette(H.colors, broken.head), fl("head")), x: 9, y: 14 - head.length },
+    { name: "rarm", c: partCanvas(ARMS[RA.rarm.kind] || ARMS.shoot, palette(RA.colors, broken.rarm), fl("rarm")), x: 19, y: 13 },
+  ];
+  layerCache.set(key, out);
+  return out;
 }
 
 // Scale2x (EPX): doubles a pixel sprite and rounds off its diagonal edges.
