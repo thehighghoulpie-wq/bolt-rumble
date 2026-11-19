@@ -1,11 +1,15 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, layers, drawText, textWidth } from "./pixel.js?v=18";
-import { PARTS } from "./engine.js?v=18";
-import { sfx } from "./sfx.js?v=18";
+import { drawText, textWidth } from "./pixel.js?v=19";
+import { drawRobot, pieceOf, weaponOf, THRUST, RW, RH, OX, OY } from "./rig.js?v=19";
+import { PARTS } from "./engine.js?v=19";
+import { sfx } from "./sfx.js?v=19";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
-const HOME = [24, 216], ACTIVE = [100, 140];
+const HOME = [24, 216], ACTIVE = [94, 146];
+const STRIDE = { biped: 20, wheels: 26, tank: 14, crawler: 15, flyer: 22, swimmer: 22 };
+const SWING = { biped: 1, wheels: 0.8, crawler: 0.5, tank: 0.3, flyer: 0.35, swimmer: 0.4 };
+const ease = (q) => (q <= 0 ? 0 : q >= 1 ? 1 : q * q * (3 - 2 * q));
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 // Pixel hex-tile arena: computed per pixel so every edge is crisp.
@@ -44,7 +48,7 @@ export function hexField(w, h, opts = {}) {
 
 // round pixel stand that robots wait on
 function drawStand(g, cx, cy) {
-  const rx = 12, ry = 4;
+  const rx = 15, ry = 4;
   for (let y = -ry; y <= ry + 6; y++) for (let x = -rx; x <= rx; x++) {
     const inTop = (x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1;
     const inSide = y > 0 && Math.abs(x) <= rx - 1 && y <= ry + 6 && (x * x) / (rx * rx) + ((y - 6) * (y - 6)) / (ry * ry) <= 1;
@@ -118,24 +122,32 @@ export class Scene {
     if (!this.vis[k]) this.vis[k] = { x: this.homeX(u.side), lunge: 0, flash: 0, shake: 0, walk: 0, smoke: 0, deadT: 0 };
     return this.vis[k];
   }
+  baseX(u) { return this.homeX(u.side) + (this.activeX(u.side) - this.homeX(u.side)) * u.pos; }
   unitXY(u) {
     const v = this.v(u);
-    const base = this.homeX(u.side) + (this.activeX(u.side) - this.homeX(u.side)) * u.pos;
-    return [base + v.lunge * (this.col(u.side) === 0 ? 1 : -1) + (v.shake ? rnd(-1.5, 1.5) : 0), this.laneY(u)];
+    return [this.baseX(u) + v.lunge * (this.col(u.side) === 0 ? 1 : -1) + (v.shake ? rnd(-1, 1) : 0), this.laneY(u) + (v.dashY || 0)];
   }
+  // where a weapon fires from: the tip of the posed arm (or the head's eye) from the last drawn frame
   muzzle(u, part) {
     const [x, y] = this.unitXY(u);
-    const dir = this.col(u.side) === 0 ? 1 : -1;
-    if (part === "head") return [x + dir * 4, y - 26];
-    return [x + dir * 13, y - 14];
+    const v = this.v(u), a = v.anc && v.anc[part === "head" ? "head" : part === "larm" ? "larm" : "rarm"];
+    const dir = v.fr === false ? -1 : this.col(u.side) === 0 || v.fr ? 1 : -1;
+    if (a) return [x + dir * (a[0] - OX), y + (a[1] - OY)];
+    return part === "head" ? [x + dir * 6, y - 44] : [x + dir * 16, y - 26];
   }
-  center(u) { const [x, y] = this.unitXY(u); return [x, y - 15]; }
+  center(u) { const [x, y] = this.unitXY(u); return [x, y - 24]; }
+  // angle from a robot's shoulder to a target, in the robot's own facing frame (+ is downward)
+  aimAt(u, t) {
+    if (!t) return 0;
+    const [x, y] = this.unitXY(u), [tx, ty] = this.center(t);
+    return Math.max(-0.75, Math.min(0.75, Math.atan2(ty - (y - 30), Math.max(12, Math.abs(tx - x)))));
+  }
   unitAtPoint(px, py) {
     if (!this.state) return null;
     for (const s of this.state.sides) for (const u of s.units) {
       if (u.down) continue;
       const [x, y] = this.unitXY(u);
-      if (px >= x - 14 && px <= x + 14 && py >= y - 32 && py <= y + 2) return [u.side, u.idx];
+      if (px >= x - 15 && px <= x + 15 && py >= y - 52 && py <= y + 2) return [u.side, u.idx];
     }
     return null;
   }
@@ -155,12 +167,13 @@ export class Scene {
       }
       if (e.t === "attack") {
         const src = U(e.src), dst = U(e.dst);
-        this.v(src).act = { kind: e.kind, part: e.part, t: 0 };
+        this.v(src).act = { kind: e.kind, part: e.part, t: 0, aim: this.aimAt(src, dst) };
+        this.v(src).faceT = 34;
         const impact = () => this.impact(dst, e);
         if (e.aimed || e.part && e.kind === "laser" && e.aimed) this.fx.push({ kind: "scope", u: dst, t: 0, dur: 16 });
         if (delay === 0) ({ strike: () => sfx.strike(), beam: () => sfx.beam(), burst: () => sfx.beam(), laser: () => sfx.laser(), missile: () => sfx.missile() }[e.kind] || (() => sfx.shoot()))();
         if (e.kind === "legcrash") { this.shakeT = Math.max(this.shakeT, 14); setTimeout(impact, 120 + delay * 10); }
-        else if (e.kind === "strike") this.lunge(src, dst, impact);
+        else if (e.kind === "strike") this.lunge(src, dst, impact, e);
         else if (e.kind === "beam" || e.kind === "burst") this.beam(src, dst, e.part, e.kind === "burst" ? 22 : 14, impact);
         else if (e.kind === "laser") this.beam(src, dst, "head", 10, impact, true);
         else if (e.kind === "missile") this.missile(src, dst, delay, impact);
@@ -168,7 +181,7 @@ export class Scene {
         delay += 6;
       } else if (e.t === "repair") {
         const d = U(e.dst);
-        if (e.src) this.v(U(e.src)).act = { kind: "support", part: e.part, t: 0 };
+        if (e.src) { this.v(U(e.src)).act = { kind: "support", part: e.part, t: 0 }; this.v(U(e.src)).faceT = 28; }
         for (let i = 0; i < 10; i++) this.fx.push({ kind: "plus", x: this.center(d)[0] + rnd(-10, 10), y: this.center(d)[1] + rnd(-6, 10), vy: -rnd(0.3, 0.8), t: -i * 2, dur: 34 });
         this.text(d, "+" + e.amount, "#5cff9a", 6);
         sfx.chime();
@@ -176,15 +189,15 @@ export class Scene {
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#7fd0ff", t: 0, dur: 30 });
         sfx.shield();
       } else if (e.t === "scan") {
-        this.v(U(e.src)).act = { kind: "support", part: "head", t: 0 };
+        this.v(U(e.src)).act = { kind: "support", part: "head", t: 0 }; this.v(U(e.src)).faceT = 28;
         this.fx.push({ kind: "scan", u: U(e.src), t: 0, dur: 40 });
         sfx.scan();
       } else if (e.t === "guard") {
-        this.v(U(e.src)).act = { kind: "guard", part: "larm", t: 0 };
+        this.v(U(e.src)).act = { kind: "guard", part: "larm", t: 0 }; this.v(U(e.src)).faceT = 28;
         this.fx.push({ kind: "ring", u: U(e.dst), col: "#ffd23f", t: 0, dur: 24 });
         sfx.land();
       } else if (e.t === "core") {
-        this.v(U(e.src)).act = { kind: "core", part: "core", t: 0 };
+        this.v(U(e.src)).act = { kind: "core", part: "core", t: 0 }; this.v(U(e.src)).faceT = 34;
         this.flashT = 10;
         sfx.riser();
         const s = U(e.src);
@@ -216,17 +229,17 @@ export class Scene {
 
   text(u, str, col, delay = 0, big = false) {
     const [x, y] = this.center(u);
-    this.fx.push({ kind: "text", x, y: y - 12, str, col, t: -delay, dur: 46, big });
+    this.fx.push({ kind: "text", x, y: y - 20, str, col, t: -delay, dur: 46, big });
   }
   impact(dst, e) {
     const v = this.v(dst);
     const [cx, cy] = this.center(dst);
     if (e.hit) v.hit = { part: e.hitPart || "torso", t: 0 };
-    if (e.hit && e.broke && e.hitPart && e.hitPart !== "head") this.dropPart(dst, e.hitPart);
-    if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.lunge = 0; sfx.miss(); return; }
+    if (e.hit && e.broke && (e.hitPart === "rarm" || e.hitPart === "larm")) this.dropPart(dst, e.hitPart);
+    if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.dodge = { t: 0 }; sfx.miss(); return; }
     if (e.crit) sfx.crit(); else sfx.hit(e.dmg >= 20 || e.kind === "strike");
     if (e.broke) setTimeout(() => sfx.break(), 90);
-    v.flash = 6; v.shake = 10;
+    v.flash = 6; v.shake = 6;
     this.freeze = Math.max(this.freeze, e.crit ? 8 : e.kind === "strike" || e.kind === "burst" ? 5 : 3);
     if (e.crit || e.kind === "burst" || e.dmg >= 20) { this.ripple(cx, cy, e.crit ? "#ff3c3c" : "#ffffff"); this.punch(); }
     if (e.anti) this.text(dst, e.anti, "#9ff0ff", 10);
@@ -258,10 +271,15 @@ export class Scene {
     const [mx, my] = this.muzzle(src, "head");
     this.fx.push({ kind: "missile", x0: mx, y0: my, dst, t: -delay, dur: 24, cb: onHit });
   }
-  lunge(src, dst, onHit) {
+  // melee: wind up, dash over to the target (even into another lane), swing, hop back
+  lunge(src, dst, onHit, e) {
     const v = this.v(src);
-    const dist = Math.max(0, Math.abs(this.unitXY(dst)[0] - this.unitXY(src)[0]) - 18);
-    this.fx.push({ kind: "lunge", v, dist, t: 0, dur: 30, cb: onHit, cbAt: 12 });
+    const part = e && e.part === "larm" ? "larm" : "rarm";
+    const dist = Math.max(0, Math.abs(this.baseX(dst) - this.baseX(src)) - 26);
+    v.dash = { t: 0, dist, dy: this.laneY(dst) - this.laneY(src), style: weaponOf(src.build[part], part), arm: part === "larm" ? "l" : "r", aim: 0.15 };
+    v.faceT = 36;
+    this.fx.push({ kind: "lunge", v, t: 0, dur: 31, cb: onHit, cbAt: 13 });
+    this.fx.push({ kind: "slash", u: dst, dir: this.col(src.side) === 0 ? 1 : -1, t: -13, dur: 6 });
   }
   ripple(x, y, col) { this.fx.push({ kind: "ripple", x, y, col, t: 0, dur: 22 }); }
   punch() {
@@ -270,29 +288,29 @@ export class Scene {
     setTimeout(() => c.classList.remove("punch"), 220);
   }
   // a broken arm or legs drops off and clatters on the floor
-  dropPart(u, part) {
-    const L = layers(u.build, { broken: { head: true, rarm: true, larm: true, legs: true } });
-    const lay = L.find((l) => l.name === part);
-    if (!lay) return;
+  piece(u, part, vx, vy, dur) {
+    const v = this.v(u);
+    const pc = pieceOf(u.build, part, v.lastP || {}, { broken: { head: true, rarm: true, larm: true, legs: true } });
+    if (!pc) return;
     const [x, y] = this.unitXY(u);
-    const left = this.col(u.side) === 0;
-    const px = left ? x - 16 + lay.x : x + 16 - lay.x - lay.c.width;
-    this.fx.push({ kind: "piece", c: lay.c, x: px, y: y - 31 + lay.y, vx: (left ? -1 : 1) * rnd(0.6, 1.4), vy: rnd(-2.2, -1.4), floor: y + 2 - lay.c.height, flip: !left, t: 0, dur: 150 });
+    const fr = v.fr !== false;
+    const px = fr ? x + pc.x : x - pc.x - pc.c.width;
+    this.fx.push({ kind: "piece", c: pc.c, x: px, y: y + pc.y, vx, vy, floor: y + 2 - pc.c.height, flip: !fr, t: 0, dur });
+  }
+  dropPart(u, part) {
+    const v = this.v(u);
+    if (v.lost && v.lost[part]) return;
+    this.piece(u, part, (this.col(u.side) === 0 ? -1 : 1) * rnd(0.6, 1.4), rnd(-2.4, -1.4), 160);
+    (v.lost || (v.lost = {}))[part] = true;
   }
   // knocked out: head and arms fly off, the rest slumps
   fallApart(u) {
     const v = this.v(u);
     if (v.apart) return;
+    const back = this.col(u.side) === 0 ? -1 : 1;
+    this.piece(u, "head", back * rnd(0.3, 0.9), rnd(-3.8, -3), 600);
+    for (const part of ["rarm", "larm"]) if (!(v.lost && v.lost[part])) this.piece(u, part, (part === "rarm" ? -back : back) * rnd(0.8, 1.8), rnd(-2.8, -1.8), 600);
     v.apart = true;
-    const L = layers(u.build, { broken: { head: true, rarm: true, larm: true, legs: true } });
-    const [x, y] = this.unitXY(u);
-    const left = this.col(u.side) === 0;
-    for (const lay of L) {
-      if (lay.name === "legs" || lay.name === "torso") continue;
-      const px = left ? x - 16 + lay.x : x + 16 - lay.x - lay.c.width;
-      const dir = lay.name === "head" ? (left ? -1 : 1) * rnd(0.3, 0.9) : (lay.name === "rarm" ? 1 : -1) * (left ? 1 : -1) * rnd(0.8, 1.8);
-      this.fx.push({ kind: "piece", c: lay.c, x: px, y: y - 31 + lay.y, vx: dir, vy: lay.name === "head" ? rnd(-3.6, -2.8) : rnd(-2.6, -1.6), floor: y + 2 - lay.c.height, flip: !left, t: 0, dur: 600 });
-    }
   }
 
   explode(u) {
@@ -312,9 +330,17 @@ export class Scene {
     if (this.shakeT > 0) { this.shakeT--; g.translate(Math.round(rnd(-2, 2)), Math.round(rnd(-2, 2))); }
     g.drawImage(this.bg, 0, 0);
     if (!S) { g.restore(); return; }
-    const units = S.sides.flatMap((s) => s.units).sort((a, b) => this.laneY(a) - this.laneY(b));
-    // shadows
-    for (const u of units) { const [x, y] = this.unitXY(u); g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(Math.round(x) - 9, y, 18, 2); g.fillRect(Math.round(x) - 7, y + 2, 14, 1); }
+    this.adv = !(this.freeze > 0) && !(this.slowmo > 0 && this.t % 2);
+    const yOf = (u) => this.laneY(u) + (this.v(u).dashY || 0);
+    const units = S.sides.flatMap((s) => s.units).sort((a, b) => yOf(a) - yOf(b));
+    // shadows (smaller while hopping or hovering)
+    for (const u of units) {
+      const [x, y] = this.unitXY(u), lp = this.v(u).lastP;
+      const air = Math.min(4, Math.max(0, -((lp && lp.y) || 0) / 2) + (u.body === "flyer" ? 2 : u.body === "swimmer" ? 1 : 0));
+      g.fillStyle = "rgba(0,0,0,.35)";
+      g.fillRect(Math.round(x - 11 + air), Math.round(y), Math.round(22 - air * 2), 2);
+      g.fillRect(Math.round(x - 8 + air), Math.round(y) + 2, Math.round(16 - air * 2), 1);
+    }
     for (const u of units) this.drawUnit(g, u);
     this.drawWeather(g);
     this.drawFx(g);
@@ -335,6 +361,7 @@ export class Scene {
         v.landed = true;
         sfx.land();
         this.shakeT = Math.max(this.shakeT, 3);
+        v.landT = 8;
         for (let i = 0; i < 8; i++) this.fx.push({ kind: "puff", x: x + rnd(-10, 10), y: y - rnd(0, 3), r: rnd(1, 3), t: 0, dur: 24, rise: true });
       }
       return 0;
@@ -357,119 +384,200 @@ export class Scene {
     drawText(g, word, Math.round(120 - w / 2), Math.round(70 - sc * 2.5), "#f8d838", "#6a2a00", Math.round(sc));
   }
 
-  // per-part offsets (in the robot's own facing direction: +x is forward, +y is down)
-  pose(u, v, moving, frame, broken) {
-    const P = { head: [0, 0], torso: [0, 0], rarm: [0, 0], larm: [0, 0], legs: [0, 0] };
-    const add = (k, dx, dy) => { P[k][0] += dx; P[k][1] += dy; };
-    const upper = (dx, dy) => { add("head", dx, dy); add("torso", dx, dy); add("rarm", dx, dy); add("larm", dx, dy); };
-    if (u.down) { // slumped wreck
-      add("torso", -1, 5); add("head", -1, 5); add("rarm", 0, 7); add("larm", 0, 7); add("legs", 0, 2);
-      return P;
-    }
-    // breathing when standing still
-    if (!moving) { const b = Math.floor((this.t + u.idx * 13 + u.side * 7) / 22) % 2; upper(0, b); add("head", 0, b ? 0 : 0); }
-    // walking: body bobs, arms swing against the legs
-    if (moving) {
-      upper(0, frame ? -1 : 0);
-      add("rarm", frame ? 1 : -1, 0); add("larm", frame ? -1 : 1, 0);
-      add("head", 0, frame ? 0 : 1);
-    }
-    // charging: lean forward and ready the chosen weapon
-    if (u.phase === "charge" && u.cmd) {
-      upper(1, 0);
+  // ------------------------------------------------------------ animation
+  // Builds this frame's pose for the jointed robot (rig.js), in two layers like cut-out animation:
+  // T = where the limbs want to be (eased toward, so moves flow into each other),
+  // O = instant offsets on top (recoil kicks, hit jolts, hops, squash).
+  pose(u, v, fr, broken) {
+    const S = this.state;
+    const run = this.adv !== false && !(u.st && u.st.stop > 0);
+    if (run) v.clock = (v.clock || 0) + 1;
+    const t = v.clock || 0;
+    const m = u.down ? 0 : Math.min(1, (v.mv || 0) / 0.2);
+    const ph = (v.dist || 0) / (STRIDE[u.body] || 20);
+    const T = { lean: 0.06 * m, headA: 0, drop: 0, rs: 1.75, re: -0.6, ls: 1.95, le: -0.5, kneel: 0, claw: 0 };
+    const O = { x: 0, y: 0, sx: 1, sy: 1, lean: 0, headA: 0, drop: 0, rs: 0, re: 0, ls: 0, le: 0, rx: 0, ry: 0, lx: 0, ly: 0, spin: 0 };
+    const glow = {}, snap = {};
+    const back = (this.col(u.side) === 0 ? -1 : 1) * (fr ? 1 : -1); // "toward my own side", in my facing frame
+
+    // idle: breathing, arms sway, head follows a beat later
+    O.drop += (0.5 + 0.5 * Math.sin(t * 0.075)) * (1 - m);
+    O.rs += 0.07 * Math.sin(t * 0.075 + 1);
+    O.ls += 0.07 * Math.sin(t * 0.075 + 2);
+    O.headA += 0.05 * Math.sin(t * 0.075 - 0.9) + 0.04 * Math.sin(ph * 4 * Math.PI) * m;
+    // walking: arms swing against the legs
+    const sw = Math.sin(ph * 2 * Math.PI) * m * (SWING[u.body] ?? 1);
+    O.rs += 0.5 * sw; O.ls -= 0.5 * sw; T.re -= 0.3 * m; T.le -= 0.3 * m;
+
+    // charging toward the action line: ready the chosen weapon
+    if (u.phase === "charge" && u.cmd && !u.down) {
       const part = u.cmd.part;
-      if (part === "rarm") add("rarm", 2, -2);
-      else if (part === "larm") add("larm", 2, -2);
-      else if (part === "head") add("head", 1, -1);
-      else if (part === "core" || part === "transform") { add("rarm", 0, -2); add("larm", 0, -2); }
+      const tgt = typeof u.cmd.target === "number" ? S.sides[1 - u.side].units[u.cmd.target] : null;
+      if (part === "rarm" || part === "larm") {
+        const A = part === "rarm" ? "r" : "l", kind = u.parts[part].kind;
+        if (kind === "shoot" || kind === "beam") { // carried low, raised to aim near the line
+          const up = u.pos > 0.78;
+          T[A + "s"] = up ? this.aimAt(u, tgt) : 1.0; T[A + "e"] = up ? 0 : -0.75;
+        }
+        else if (kind === "strike") { T[A + "s"] = -0.9; T[A + "e"] = -1.5; }
+        else { T[A + "s"] = 0.25; T[A + "e"] = -1.75; }
+        O[A + "s"] = 0;
+        T.lean += 0.06;
+      } else if (part === "head") { T.headA = this.aimAt(u, tgt) * 0.5; T.lean += 0.04; }
+      else { T.rs = 1.0; T.re = -2.1; T.ls = 1.1; T.le = -2.1; }
     }
+
     // acting
     const a = v.act;
     if (a) {
-      a.t++;
-      const arm = a.part === "larm" ? "larm" : "rarm";
-      if (a.kind === "shoot") { if (a.t < 14) add(arm, a.t % 4 < 2 ? -2 : 1, a.t % 4 < 2 ? 0 : -1); }
-      else if (a.kind === "beam" || a.kind === "burst") { if (a.t < 18) { add(arm, 2, -1); upper(a.t % 2 ? -1 : 0, 0); } }
-      else if (a.kind === "strike") { if (a.t > 6 && a.t < 20) add(arm, 5, -1); if (a.t < 6) add(arm, -2, 0); }
-      else if (a.kind === "laser" || a.kind === "missile" || a.part === "head") { if (a.t < 14) { add("head", 1, -2); add("torso", 0, -1); } }
-      else if (a.kind === "support" || a.kind === "guard") { if (a.t < 22) add(a.kind === "guard" ? "larm" : arm, 2, -3); }
-      else if (a.kind === "core") { if (a.t < 26) { add("rarm", 0, -4); add("larm", 0, -4); upper(0, -1); } }
-      if (a.t > 30) v.act = null;
+      if (run) a.t++;
+      const k = a.t, A = a.part === "larm" ? "l" : "r";
+      if (a.kind === "shoot") {
+        if (k < 18) { T[A + "s"] = a.aim; T[A + "e"] = 0; O[A + "s"] = 0; if (k < 12 && k % 4 < 2) { O[A + "x"] -= 2; O[A + "s"] -= 0.2; O.lean -= 0.04; } }
+      } else if (a.kind === "beam" || a.kind === "burst") {
+        const d = a.kind === "burst" ? 22 : 14;
+        if (k < d + 6) { T[A + "s"] = a.aim; T[A + "e"] = 0; O[A + "s"] = 0; if (k < d) { O.x += back * (1 + (k % 2)); O.lean -= 0.08; glow[a.part === "larm" ? "larm" : "rarm"] = 1; } }
+      } else if (a.kind === "laser") {
+        if (k < 16) { T.headA = a.aim * 0.6 - 0.05; O.lean -= 0.05; glow.head = 1; }
+      } else if (a.kind === "missile") {
+        if (k < 6) O.drop += 2; else if (k < 14) { O.y -= 2; T.headA = -0.3; }
+      } else if (a.kind === "support") {
+        if (k < 26) { T.rs = -1.25; T.re = -0.4; T.ls = -1.1; T.le = -0.4; O.y -= Math.min(2, k / 3); glow.head = 1; }
+      } else if (a.kind === "guard") {
+        if (k < 26) { T.ls = 0.2; T.le = -1.8; O.drop += 1.5; }
+      } else if (a.kind === "core") {
+        if (k < 6) { O.drop += 3; T.rs = T.ls = 2.4; T.re = T.le = -0.3; }
+        else if (k < 28) { T.rs = -2.2; T.ls = -2.5; T.re = T.le = -0.2; O.y -= 5 * Math.sin(Math.PI * Math.min(1, (k - 6) / 14)); }
+        else if (k < 32) { O.sy = 0.88; O.sx = 1.1; }
+      } else if (a.kind === "legcrash") {
+        if (k < 10) { O.y -= 7 * Math.sin((Math.PI * k) / 10); T.rs = T.ls = -1.5; } else if (k < 15) { O.sy = 0.82; O.sx = 1.14; }
+      }
+      if (k > 40) v.act = null;
     }
-    // getting hit: knocked back, the hit part jolts
+
+    // melee dash: wind up, rush over, swing (snapped, no easing), hop back
+    const d = v.dash;
+    v.lunge = 0; v.dashY = 0;
+    if (d) {
+      const k = d.t, A = d.arm, th = THRUST[d.style];
+      let out = 0;
+      if (k < 4) { T[A + "s"] = -2.3; T[A + "e"] = -0.7; T.lean = -0.15; O.drop += 1.5; }
+      else if (k < 13) { out = ease((k - 4) / 9); T[A + "s"] = th ? -0.2 : -2.3; T[A + "e"] = th ? -1.7 : -0.6; T.lean = 0.3; }
+      else if (k < 20) {
+        out = 1; snap[A + "s"] = snap[A + "e"] = true;
+        if (th) { T[A + "s"] = d.aim; T[A + "e"] = 0; O[A + "x"] += k < 16 ? 3 : 1; T.claw = k < 15 ? 1 : 0; }
+        else { T[A + "s"] = k < 14 ? -0.8 : 0.75; T[A + "e"] = 0; }
+        T.lean = 0.35;
+      } else { const q = Math.min(1, (k - 20) / 11); out = 1 - ease(q); O.y -= 5 * Math.sin(Math.PI * q); }
+      O[A + "s"] = 0;
+      v.lunge = d.dist * out; v.dashY = d.dy * out;
+      O.spin = k;
+    }
+
+    // getting hit: knocked back, the hit part jolts, wobble settles
     if (v.hit) {
-      v.hit.t++;
-      if (v.hit.t < 6) { upper(-2, 0); add(v.hit.part === "torso" ? "torso" : v.hit.part, -1, -1); }
-      else if (v.hit.t < 10) upper(-1, 0);
-      if (v.hit.t > 12) v.hit = null;
+      if (run) v.hit.t++;
+      const k = v.hit.t, f = k < 3 ? 1 : Math.max(0, 1 - (k - 3) / 11), w = f * (1 + 0.3 * Math.sin(k * 1.3));
+      O.x += back * 3 * w; O.lean += back * 0.3 * w; O.headA += back * (v.hit.part === "head" ? 0.55 : 0.25) * w;
+      O.rs -= 0.5 * w; O.ls -= 0.4 * w;
+      if (v.hit.part === "rarm") O.rs -= 0.7 * w;
+      if (v.hit.part === "larm") O.ls -= 0.7 * w;
+      if (v.hit.part === "legs") O.drop += 2 * w;
+      if (k > 16) v.hit = null;
     }
-    // broken parts hang limp; broken legs drop the body
-    if (broken.rarm) add("rarm", -1, 3);
-    if (broken.larm) add("larm", -1, 3);
-    if (broken.legs) { upper(0, 3); add("legs", 0, 1); }
-    // victory cheer
-    if (this.state && this.state.winner === u.side) {
-      const up = Math.floor(this.t / 10) % 2;
-      add("rarm", 0, up ? -5 : -2); add("larm", 0, up ? -2 : -5); upper(0, up ? -1 : 0);
+    // dodged: a quick hop back
+    if (v.dodge) {
+      if (run) v.dodge.t++;
+      const q = v.dodge.t / 14;
+      if (q >= 1) v.dodge = null;
+      else { const s = Math.sin(Math.PI * q); O.x += back * 6 * s; O.y -= 4 * s; O.lean += back * 0.15 * s; }
     }
-    return P;
+    // victory: hop, squash on landing, arms up
+    if (S.winner === u.side && !u.down) {
+      const q = (t % 40) / 40;
+      if (q < 0.45) O.y -= 6 * Math.sin((Math.PI * q) / 0.45);
+      else if (q < 0.55) { O.sy = 0.9; O.sx = 1.08; }
+      T.rs = -2.3 + 0.3 * Math.sin(t * 0.3); T.re = -0.3; T.ls = -2.0; T.le = -0.4; T.headA = -0.25;
+    }
+    // knocked out: stagger, then sink to the knees
+    if (u.down) {
+      const k = v.deadT || 0;
+      if (k < 16) { O.lean += back * 0.3; O.headA -= 0.4; O.rs -= 1; O.ls -= 1; O.x += back * Math.sin(k * 0.8); T.kneel = 0.3; }
+      else { T.kneel = 1; T.lean = 0.55; T.headA = 0.5; }
+    }
+    // broken parts hang limp; broken legs drop to one knee
+    if (broken.rarm) { T.rs = 1.55; T.re = 0.1; O.rs = 0.04 * Math.sin(t * 0.1); }
+    if (broken.larm) { T.ls = 1.6; T.le = 0.1; O.ls = 0.04 * Math.sin(t * 0.1 + 1); }
+    if (broken.legs && !u.down) T.kneel = 0.5;
+    if (v.lost) for (const p of ["rarm", "larm"]) if (v.lost[p] && u.parts[p].hp > 0) v.lost[p] = false; // repaired
+    // landing from the intro drop
+    if (v.landT > 0) { const q = v.landT / 8; O.sy *= 1 - 0.16 * q; O.sx *= 1 + 0.12 * q; if (this.adv) v.landT--; }
+
+    const cur = v.cur || (v.cur = { ...T });
+    for (const key in T) cur[key] = snap[key] ? T[key] : cur[key] + (T[key] - cur[key]) * (run ? 0.28 : 0);
+    const hide = { head: !!v.apart, rarm: !!(v.apart || (v.lost && v.lost.rarm)), larm: !!(v.apart || (v.lost && v.lost.larm)) };
+    return {
+      t, walk: ph, move: m, x: O.x, y: O.y, sx: O.sx, sy: O.sy,
+      drop: cur.drop + O.drop, lean: cur.lean + O.lean, headA: cur.headA + O.headA,
+      rs: cur.rs + O.rs, re: cur.re + O.re, ls: cur.ls + O.ls, le: cur.le + O.le,
+      rx: O.rx, ry: O.ry, lx: O.lx, ly: O.ly, kneel: cur.kneel, claw: cur.claw, spin: O.spin, glow, hide,
+    };
   }
 
   drawUnit(g, u) {
     const v = this.v(u);
-    const [x0, y] = this.unitXY(u);
-    const x = Math.round(x0);
-    const moving = Math.abs(x0 - v.x) > 0.05;
-    v.x = x0;
-    if (moving) v.walk++;
-    const legsBody = u.body;
-    const hover = legsBody === "flyer" || legsBody === "swimmer";
-    const frame = hover ? (Math.floor(this.t / 10) % 2) : moving ? Math.floor(v.walk / 7) % 2 : 0;
-    const bob = hover ? Math.round(Math.sin(this.t / 9 + u.idx) * 1.5) - 2 : moving && frame ? -1 : 0;
+    const left = this.col(u.side) === 0;
+    if (v.faceT > 0 && this.adv !== false) v.faceT--;
+    // face the enemy while charging or finishing a move, face home while walking back
+    const fr = left ? u.phase !== "cool" || u.down || v.faceT > 0 : u.phase === "cool" && !u.down && !(v.faceT > 0);
+    const base = this.baseX(u);
+    if (v.bx === undefined) v.bx = base;
+    const dxw = base - v.bx;
+    v.bx = base;
+    v.dist = (v.dist || 0) + dxw * (fr ? 1 : -1); // backing off runs the walk cycle in reverse
+    v.mv = (v.mv || 0) * 0.8 + Math.abs(dxw) * 0.2;
+    const [x0, y0] = this.unitXY(u);
+    const x = Math.round(x0), y = Math.round(y0);
     const broken = { head: u.parts.head.hp <= 0, rarm: u.parts.rarm.hp <= 0, larm: u.parts.larm.hp <= 0, legs: u.parts.legs.hp <= 0 };
-    if (u.down) { broken.head = broken.rarm = broken.larm = broken.legs = true; v.deadT++; }
+    if (u.down) { broken.head = broken.rarm = broken.larm = broken.legs = true; if (this.adv !== false) v.deadT++; }
     const hitFlash = v.hit && v.hit.t < 8 && v.hit.t % 2 === 0 ? v.hit.part : null;
     const flashPart = hitFlash || (v.flash > 0 && v.flash % 2 === 0 ? "all" : null);
     if (v.flash > 0) v.flash--;
     if (v.shake > 0) v.shake--;
-    const L = layers(u.build, { frame, broken, flashPart });
-    const pose = this.pose(u, v, moving, frame, broken);
-    const left = this.col(u.side) === 0;
-    const facingRight = left ? u.phase !== "cool" || u.down : u.phase === "cool" && !u.down;
-    const top = y - 31 + bob + this.dropOffset(u, x, y);
+    const P = this.pose(u, v, fr, broken);
+    if (!v.cv) { v.cv = document.createElement("canvas"); v.cv.width = RW; v.cv.height = RH; }
+    const res = drawRobot(u.build, P, { broken, flashPart, core: u.core && u.core.color, canvas: v.cv });
+    v.anc = res.anchors; v.fr = fr; v.lastP = P;
+    if (v.top0 === undefined) v.top0 = res.anchors.top[1] - OY;
+    const top = y - OY + this.dropOffset(u, x, y);
     g.save();
-    if (u.down) g.globalAlpha = 0.8;
-    for (const lay of L) {
-      if (u.down && v.apart && (lay.name === "head" || lay.name === "rarm" || lay.name === "larm")) continue;
-      const [dx, dy] = pose[lay.name] || [0, 0];
-      const ly = top + lay.y + dy;
-      if (facingRight) g.drawImage(lay.c, x - 16 + lay.x + dx, ly);
-      else { g.save(); g.translate(x + 16 - lay.x - dx, ly); g.scale(-1, 1); g.drawImage(lay.c, 0, 0); g.restore(); }
-    }
+    if (u.down) g.globalAlpha = 0.85;
+    if (fr) g.drawImage(v.cv, x - OX, top);
+    else { g.translate(x + OX, top); g.scale(-1, 1); g.drawImage(v.cv, 0, 0); }
     g.restore();
     // status: shields, guard, haste trail
     const side = this.state.sides[u.side];
     if (!u.down && u.st.transform > 0) {
       const a = this.t % 6 < 3;
-      g.strokeStyle = a ? "#f8d838" : "#ffffff"; g.strokeRect(x - 15.5, y - 34.5, 31, 36);
-      if (this.t % 5 === 0) this.fx.push({ kind: "spark", x: x + rnd(-12, 12), y: y - rnd(2, 32), vx: 0, vy: -0.7, col: "#f8d838", t: 0, dur: 16 });
+      g.strokeStyle = a ? "#f8d838" : "#ffffff"; g.strokeRect(x - 16.5, y - 54.5, 33, 56);
+      if (this.t % 5 === 0) this.fx.push({ kind: "spark", x: x + rnd(-14, 14), y: y - rnd(2, 50), vx: 0, vy: -0.7, col: "#f8d838", t: 0, dur: 16 });
     }
-    if (!u.down && u.st.stop > 0) { g.strokeStyle = "#9ff0ff"; g.strokeRect(x - 13.5, y - 32.5, 27, 32); g.fillStyle = "rgba(159,240,255,.25)"; g.fillRect(x - 13, y - 32, 26, 31); }
-    if (!u.down && (u.st.shield > 0 || side.shield > 0) && this.t % 4 < 2) { g.strokeStyle = "#7fd0ff"; g.strokeRect(x - 14.5, y - 33.5, 29, 34); }
-    if (!u.down && u.st.guardedBy !== null) { g.fillStyle = "#ffd23f"; g.fillRect(x + (left ? 12 : -14), y - 22, 2, 10); }
-    if (!u.down && side.haste > 0 && moving) { g.fillStyle = "rgba(255,255,255,.5)"; for (let i = 0; i < 3; i++) g.fillRect(x + (left ? -16 - i * 4 : 14 + i * 4), y - 20 + i * 6, 3, 1); }
-    if (!u.down && u.st.overclock > 0 && this.t % 6 === 0) this.fx.push({ kind: "spark", x: x + rnd(-8, 8), y: y - rnd(4, 28), vx: 0, vy: -0.6, col: "#ff5c3c", t: 0, dur: 14 });
+    if (!u.down && u.st.stop > 0) { g.strokeStyle = "#9ff0ff"; g.strokeRect(x - 15.5, y - 52.5, 31, 53); g.fillStyle = "rgba(159,240,255,.25)"; g.fillRect(x - 15, y - 52, 30, 52); }
+    if (!u.down && (u.st.shield > 0 || side.shield > 0) && this.t % 4 < 2) { g.strokeStyle = "#7fd0ff"; g.strokeRect(x - 17.5, y - 55.5, 35, 57); }
+    if (!u.down && u.st.guardedBy !== null) { g.fillStyle = "#ffd23f"; g.fillRect(x + (left ? 16 : -18), y - 34, 2, 14); }
+    if (!u.down && side.haste > 0 && P.move > 0.3) { g.fillStyle = "rgba(255,255,255,.5)"; for (let i = 0; i < 3; i++) g.fillRect(x + (left ? -18 - i * 4 : 16 + i * 4), y - 34 + i * 9, 3, 1); }
+    if (!u.down && u.st.overclock > 0 && this.t % 6 === 0) this.fx.push({ kind: "spark", x: x + rnd(-10, 10), y: y - rnd(6, 44), vx: 0, vy: -0.6, col: "#ff5c3c", t: 0, dur: 14 });
     // smoke from broken parts
-    if (!u.down && (broken.rarm || broken.larm || broken.legs) && this.t % 14 === u.idx) this.fx.push({ kind: "puff", x: x + rnd(-6, 6), y: y - rnd(10, 24), r: 2, t: 0, dur: 30, rise: true });
-    if (u.down && this.t % 20 === 0) this.fx.push({ kind: "puff", x: x + rnd(-4, 4), y: y - 12, r: 2, t: 0, dur: 36, rise: true });
-    // head hp bar + charge pip
+    if (!u.down && (broken.rarm || broken.larm || broken.legs) && this.t % 14 === u.idx) this.fx.push({ kind: "puff", x: x + rnd(-8, 8), y: y - rnd(12, 34), r: 2, t: 0, dur: 30, rise: true });
+    if (u.down && this.t % 20 === 0) this.fx.push({ kind: "puff", x: x + rnd(-5, 5), y: y - 16, r: 2, t: 0, dur: 36, rise: true });
+    // head armor bar + core-ready pip
     if (!u.down) {
-      const hp = u.parts.head.hp / u.parts.head.max;
-      g.fillStyle = "#0b0d12"; g.fillRect(x - 9, y - 38, 18, 4);
+      const hp = u.parts.head.hp / u.parts.head.max, by = Math.round(y + v.top0 - 7);
+      g.fillStyle = "#0b0d12"; g.fillRect(x - 10, by, 20, 4);
       g.fillStyle = hp > 0.5 ? "#3ddc97" : hp > 0.25 ? "#ffd23f" : "#ff5c7a";
-      g.fillRect(x - 8, y - 37, Math.max(1, Math.round(16 * hp)), 2);
-      if (u.meter >= 100 && this.t % 20 < 10) { g.fillStyle = u.core.color || "#ffd23f"; g.fillRect(x + 10, y - 38, 3, 4); }
-      if (u.idx === 0) drawText(g, "L", x - 14, y - 39, "#ffd23f", "#000");
+      g.fillRect(x - 9, by + 1, Math.max(1, Math.round(18 * hp)), 2);
+      if (u.meter >= 100 && this.t % 20 < 10) { g.fillStyle = u.core.color || "#ffd23f"; g.fillRect(x + 11, by, 3, 4); }
+      if (u.idx === 0) drawText(g, "L", x - 15, by - 1, "#ffd23f", "#000");
     }
   }
 
@@ -504,7 +612,7 @@ export class Scene {
     const [x, y] = this.unitXY(u);
     const b = Math.floor(this.t / 8) % 2;
     g.fillStyle = col;
-    const ax = Math.round(x), ay = y - 46 + b;
+    const ax = Math.round(x), ay = Math.round(y + (this.v(u).top0 ?? -54) - 14 + b);
     g.fillRect(ax - 3, ay, 7, 1); g.fillRect(ax - 2, ay + 1, 5, 1); g.fillRect(ax - 1, ay + 2, 3, 1); g.fillRect(ax, ay + 3, 1, 1);
   }
 
@@ -545,9 +653,8 @@ export class Scene {
           break;
         }
         case "lunge": {
-          const out = f.t < 12 ? f.t / 12 : f.t < 18 ? 1 : Math.max(0, 1 - (f.t - 18) / 12);
-          f.v.lunge = f.dist * out;
-          if (f.t >= f.dur) f.v.lunge = 0;
+          if (f.v.dash) f.v.dash.t = f.t;
+          if (f.t >= f.dur) { f.v.dash = null; f.v.lunge = 0; f.v.dashY = 0; }
           break;
         }
         case "text": {
@@ -595,6 +702,15 @@ export class Scene {
           if (f.flip) { g.translate(Math.round(f.x) + f.c.width, Math.round(f.y)); g.scale(-1, 1); g.drawImage(f.c, 0, 0); }
           else g.drawImage(f.c, Math.round(f.x), Math.round(f.y));
           g.restore();
+          break;
+        }
+        case "slash": { // swoosh arc where the melee weapon lands
+          const [cx, cy] = this.center(f.u);
+          g.fillStyle = f.t < 2 ? "#ffffff" : "#fff3a0";
+          for (let i = 0; i <= 16; i++) {
+            const a = -1.3 + (2.4 * i) / 16, w = i > 2 && i < 14 && p < 0.5 ? 2 : 1;
+            g.fillRect(Math.round(cx - f.dir * 4 + f.dir * Math.cos(a) * 8), Math.round(cy + Math.sin(a) * 12), w, w);
+          }
           break;
         }
         case "scope": {

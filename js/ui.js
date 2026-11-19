@@ -1,10 +1,10 @@
-import { DATA } from "./data.js?v=18";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=18";
-import { spriteImg, spriteURL } from "./pixel.js?v=18";
-import { Scene, W, H, hexField } from "./scene.js?v=18";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=18";
-import { Link, makeCode } from "./net.js?v=18";
-import { sfx } from "./sfx.js?v=18";
+import { DATA } from "./data.js?v=19";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=19";
+import { spriteImg, spriteURL } from "./pixel.js?v=19";
+import { Scene, W, H, hexField } from "./scene.js?v=19";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=19";
+import { Link, makeCode } from "./net.js?v=19";
+import { sfx } from "./sfx.js?v=19";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -95,7 +95,7 @@ function renderWorkshop() {
       const x = r[p];
       const pv = { head: r.id, rarm: r.id, larm: r.id, legs: r.id };
       return `<button class="chip ${b[p] === r.id ? "on" : ""}" data-p="${p}" data-id="${r.id}">
-        ${spriteImg(pv, 1)}<span><b>${esc(x.name)}</b><small>${esc(r.name)} · ${p === "legs" ? r.body.toUpperCase() : KIND_TEXT[x.kind]}</small><small>${partLine(r, p)}</small>${p === "legs" ? "" : subTags(x)}</span></button>`;
+        ${spriteImg(pv, 1, { focus: p })}<span><b>${esc(x.name)}</b><small>${esc(r.name)} · ${p === "legs" ? r.body.toUpperCase() : KIND_TEXT[x.kind]}</small><small>${partLine(r, p)}</small>${p === "legs" ? "" : subTags(x)}</span></button>`;
     }).join("") + `</div>`;
   }
   html += `<h4>CORE</h4><div class="chips">` + DATA.cores.map((c) => {

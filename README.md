@@ -17,7 +17,8 @@ An 8-bit robot battler you play in the browser. Snap on parts, charge your core,
 - **Collection and shop**: an album of all robots, and bolts to buy parts and chips.
 - **Bolt Watch**: a mystery robot that assembles itself from the steps your robots take in battle.
 - **Personalities**: each core fights in its own style (Shooter, Defender, Medic, Berserker, Sniper, Interrupter). Enemy robots and the AUTO button follow it.
-- **Animation**: every body part moves on its own. Robots breathe, swing their arms while walking, lean in to aim, recoil and thrust when they attack, and lose broken arms and legs. On a KO their head and arms fly off.
+- **Animation**: robots are jointed puppets, redrawn as pixel art every frame. Each leg type moves its own way: walking legs step, treads roll, spider legs scuttle, wings flap over a jet, roller legs skate, fish tails swish. Guns are carried low and raised to fire with recoil. Melee robots wind up, dash over, swing and hop back. Hits knock robots back, misses become dodges, broken arms fall off, and a KO sends the head flying.
+- **Different parts look different**: every arm carries its own weapon (blaster, twin gun, rifle, cannon, beam emitter, fist, blade, claw, drill, hammer or shield), and every head has its own crest plus a gadget for its move.
 
 ## How a battle works
 Each team has three robots. The ★ leader stands in the middle, and if its head breaks, that team loses. A robot waits on its command line until you give it an order. Then it walks to the centre while charging, does its move, and walks back to cool down. Faster legs walk faster. Every part has its own armor: broken arms can't be used, broken legs slow you down, and a broken head knocks the robot out.
@@ -39,7 +40,8 @@ These run 1,500+ simulated battles and check: no crashes, sensible battle length
 
 ## Tech
 - `js/engine.js`: deterministic real-time battle engine (no DOM).
-- `js/pixel.js`: hand-drawn pixel part templates, composited into 32×32 robots with a 15-bit palette, or split into per-part layers for animation.
+- `js/rig.js`: jointed robots. Limbs are shapes placed at joint angles (with leg IK), rasterised with outlines and 3-tone shading in a 15-bit palette.
+- `js/pixel.js`: menu pictures of the robots, Scale2x and the pixel font.
 - `js/scene.js`: 240×160 canvas battle scene with effects.
 - `js/ui.js`: menus, workshop, battle controller, arcade and versus modes.
 - `js/net.js`: online play over WebRTC via [PeerJS](https://peerjs.com/). Its public broker only introduces the two players; the match data then goes directly between them.
