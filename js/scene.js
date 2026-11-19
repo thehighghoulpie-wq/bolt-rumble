@@ -1,6 +1,6 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { sprite, drawText, textWidth } from "./pixel.js?v=8";
-import { PARTS } from "./engine.js?v=8";
+import { sprite, drawText, textWidth } from "./pixel.js?v=9";
+import { PARTS } from "./engine.js?v=9";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -90,6 +90,8 @@ export class Scene {
     this.t = 0;
     this.shakeT = 0;
     this.flashT = 0;
+    this.freeze = 0;   // hit-stop frames
+    this.slowmo = 0;   // slow-motion frames (read by the game loop too)
     this.cursor = null;
     this.actor = null;
     this.state = null;
@@ -158,6 +160,7 @@ export class Scene {
         for (let i = 0; i < 24; i++) this.fx.push({ kind: "spark", x: this.center(s)[0], y: this.center(s)[1], vx: rnd(-1.6, 1.6), vy: rnd(-1.8, 0.4), col: s.core.color || "#ffd23f", t: 0, dur: 28 });
       } else if (e.t === "down") {
         const d = U(e.dst);
+        this.slowmo = e.leader ? 90 : 50;
         setTimeout(() => this.explode(d), 260);
       } else if (e.t === "skip") {
         const s = U(e.src);
@@ -175,6 +178,8 @@ export class Scene {
     const [cx, cy] = this.center(dst);
     if (!e.hit) { this.text(dst, "MISS", "#c8c8d8", 0, true); v.lunge = 0; return; }
     v.flash = 6; v.shake = 10;
+    this.freeze = Math.max(this.freeze, e.crit ? 8 : e.kind === "strike" || e.kind === "burst" ? 5 : 3);
+    if (e.crit || e.kind === "burst" || e.dmg >= 20) { this.ripple(cx, cy, e.crit ? "#ff3c3c" : "#ffffff"); this.punch(); }
     if (e.crit) { this.shakeT = 12; this.text(dst, "CRIT " + e.dmg, "#ffd23f", 0, true); }
     else this.text(dst, String(e.dmg), "#ff6b6b", 0, true);
     if (e.guarded) this.fx.push({ kind: "ring", u: dst, col: "#ffd23f", t: 0, dur: 16 });
@@ -206,9 +211,16 @@ export class Scene {
     const dist = Math.max(0, Math.abs(this.unitXY(dst)[0] - this.unitXY(src)[0]) - 18);
     this.fx.push({ kind: "lunge", v, dist, t: 0, dur: 30, cb: onHit, cbAt: 12 });
   }
+  ripple(x, y, col) { this.fx.push({ kind: "ripple", x, y, col, t: 0, dur: 22 }); }
+  punch() {
+    const c = this.cv;
+    c.classList.remove("punch"); void c.offsetWidth; c.classList.add("punch");
+    setTimeout(() => c.classList.remove("punch"), 220);
+  }
   explode(u) {
     const [cx, cy] = this.center(u);
-    this.shakeT = 16; this.flashT = 4;
+    this.shakeT = 16; this.flashT = 4; this.freeze = 10;
+    this.ripple(cx, cy, "#ff3c3c"); this.ripple(cx, cy, "#ffffff"); this.punch();
     for (let i = 0; i < 40; i++) this.fx.push({ kind: "spark", x: cx + rnd(-6, 6), y: cy + rnd(-8, 8), vx: rnd(-2.5, 2.5), vy: rnd(-3, 1), col: ["#fff3a0", "#ffb03c", "#ff5c3c", "#ffffff"][i % 4], t: 0, dur: rnd(24, 44) });
     for (let i = 0; i < 8; i++) this.fx.push({ kind: "puff", x: cx + rnd(-8, 8), y: cy + rnd(-8, 4), r: rnd(3, 6), t: -i * 2, dur: 40 });
     this.text(u, "K.O.", "#ffffff", 8, true);
@@ -289,8 +301,11 @@ export class Scene {
 
   drawFx(g) {
     const keep = [];
+    const adv = !(this.freeze > 0) && !(this.slowmo > 0 && this.t % 2);
+    if (this.freeze > 0) this.freeze--;
+    if (this.slowmo > 0) this.slowmo--;
     for (const f of this.fx) {
-      f.t++;
+      if (adv) f.t++;
       if (f.t < 0) { keep.push(f); continue; }
       const p = f.t / f.dur;
       switch (f.kind) {
@@ -317,7 +332,7 @@ export class Scene {
           const x = f.x0 + (tx - f.x0) * p, y = f.y0 + (ty - f.y0) * p - Math.sin(p * Math.PI) * 30;
           g.fillStyle = "#e0e4f0"; g.fillRect(Math.round(x) - 2, Math.round(y) - 1, 4, 2);
           g.fillStyle = "#ff5c3c"; g.fillRect(Math.round(x) - 3 * Math.sign(tx - f.x0 || 1), Math.round(y), 1, 1);
-          if (f.t % 2 === 0) keep.push({ kind: "puff", x, y, r: 1, t: 0, dur: 14 });
+          if (adv && f.t % 2 === 0) keep.push({ kind: "puff", x, y, r: 1, t: 0, dur: 14 });
           break;
         }
         case "lunge": {
@@ -333,25 +348,25 @@ export class Scene {
           break;
         }
         case "spark": {
-          f.x += f.vx; f.y += f.vy; f.vy += 0.12;
+          if (adv) { f.x += f.vx; f.y += f.vy; f.vy += 0.12; }
           const sz = p < 0.5 ? 2 : 1;
           g.fillStyle = f.col; g.fillRect(Math.round(f.x), Math.round(f.y), sz, sz);
           break;
         }
         case "debris": {
-          f.x += f.vx; f.y += f.vy; f.vy += 0.15;
+          if (adv) { f.x += f.vx; f.y += f.vy; f.vy += 0.15; }
           g.fillStyle = "#8a90a0"; g.fillRect(Math.round(f.x), Math.round(f.y), 2, 2);
           break;
         }
         case "puff": {
-          if (f.rise) f.y -= 0.35;
+          if (f.rise && adv) f.y -= 0.35;
           const r = Math.round(f.r + p * 3);
           g.fillStyle = `rgba(150,150,165,${0.55 * (1 - p)})`;
           g.fillRect(Math.round(f.x) - r, Math.round(f.y) - r, r * 2, r * 2);
           break;
         }
         case "plus": {
-          f.y += f.vy;
+          if (adv) f.y += f.vy;
           g.fillStyle = "#5cff9a"; g.fillRect(Math.round(f.x), Math.round(f.y) - 1, 1, 3); g.fillRect(Math.round(f.x) - 1, Math.round(f.y), 3, 1);
           break;
         }
@@ -363,6 +378,14 @@ export class Scene {
           g.globalAlpha = 1;
           break;
         }
+        case "ripple": {
+          const r = 4 + p * 30, ry = r * 0.55;
+          g.fillStyle = f.col; g.globalAlpha = 1 - p;
+          const n = Math.max(12, Math.round(r * 2.2));
+          for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; g.fillRect(Math.round(f.x + Math.cos(a) * r), Math.round(f.y + Math.sin(a) * ry), 2, 2); }
+          g.globalAlpha = 1;
+          break;
+        }
         case "scan": {
           const [cx, cy] = this.center(f.u);
           const x = cx + (this.col(f.u.side) === 0 ? 1 : -1) * p * 200;
@@ -371,7 +394,7 @@ export class Scene {
           break;
         }
       }
-      if (f.cb && f.t === (f.cbAt ?? f.dur)) f.cb();
+      if (adv && f.cb && f.t === (f.cbAt ?? f.dur)) f.cb();
       if (f.t < f.dur) keep.push(f);
     }
     this.fx = keep;

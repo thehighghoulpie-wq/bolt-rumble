@@ -180,3 +180,17 @@ button:focus-visible { background: var(--win2); outline: 2px solid var(--hot); o
   .stand img { width: 48px; height: 48px; }
   .formation .stand:nth-child(2) { margin-left: 30px; } .formation.foe .stand:nth-child(2) { margin-right: 30px; }
 }
+
+/* motion: whip transitions, overshoot pop-ins, camera punch */
+.screen.active { animation: whip .34s cubic-bezier(.2, 1.35, .4, 1); }
+@keyframes whip { from { transform: translateX(48px) skewX(-6deg); filter: blur(1.5px); } to { transform: none; filter: none; } }
+.cmdwin:not(.hidden) { animation: drop .3s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes drop { from { transform: translateY(18px) scale(.95); } to { transform: none; } }
+.result h2 { animation: land .5s cubic-bezier(.2, 1.8, .4, 1), pulse2 1.2s .5s steps(2) infinite; }
+@keyframes land { from { transform: scale(2.2) rotate(-4deg); } to { transform: none; } }
+@keyframes pulse2 { 50% { transform: scale(1.04); } }
+.result img { animation: land .45s .15s cubic-bezier(.2, 1.8, .4, 1) both, bob 1.2s .6s steps(2) infinite; }
+.stage canvas.punch { animation: punch .22s cubic-bezier(.2, 1.6, .4, 1); }
+@keyframes punch { 0% { transform: scale(1.05); } 100% { transform: none; } }
+.stage { overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .screen.active, .cmdwin:not(.hidden), .result h2, .result img, .stage canvas.punch { animation: none; } }

@@ -1,9 +1,9 @@
-import { DATA } from "./data.js?v=8";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=8";
-import { spriteImg, spriteURL } from "./pixel.js?v=8";
-import { Scene, W, H, hexField } from "./scene.js?v=8";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=8";
-import { Link, makeCode } from "./net.js?v=8";
+import { DATA } from "./data.js?v=9";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL } from "./engine.js?v=9";
+import { spriteImg, spriteURL } from "./pixel.js?v=9";
+import { Scene, W, H, hexField } from "./scene.js?v=9";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor } from "./meta.js?v=9";
+import { Link, makeCode } from "./net.js?v=9";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);
@@ -150,6 +150,8 @@ function frameBody(mult = 1, draw = true) {
   const st = B.state;
   if (!B.ended) {
     for (let k = 0; k < B.speed * mult; k++) {
+      if (scene.freeze > 0 && mult === 1) break;                       // hit-stop
+      if (scene.slowmo > 0 && mult === 1 && B.frame % 3) break;         // slow motion after a knock-out
       applyRemote();
       if (B.ai.length) autoCommands(st, B.ai, { [B.ai[0]]: B.level });
       const pend = pending(st);
