@@ -1,11 +1,11 @@
-import { DATA } from "./data.js?v=20";
-import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=20";
-import { spriteImg, spriteURL } from "./pixel.js?v=20";
-import { drawRobot, RW, RH, OX, OY } from "./rig.js?v=20";
-import { Scene, W, H, hexField } from "./scene.js?v=20";
-import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=20";
-import { Link, makeCode } from "./net.js?v=20";
-import { sfx } from "./sfx.js?v=20";
+import { DATA } from "./data.js?v=21";
+import { createBattle, step, pending, giveCommand, actionsFor, aiCommand, autoCommands, hashState, PARTS, PART_LABEL, SPECIALS, CORE_TREE, TIER_LV, AFFINITY, MAX_CORE_LV, FIELDS, FIELD_IDS, CHIPS, CHIP_IDS, subSkills, SUBSKILL_NAME, terrainGrade, canTransform, PERSONALITY } from "./engine.js?v=21";
+import { spriteImg, spriteURL } from "./pixel.js?v=21";
+import { drawRobot, RW, RH, OX, OY } from "./rig.js?v=21";
+import { Scene, W, H, hexField } from "./scene.js?v=21";
+import { loadProfile, saveProfile, resetProfile, ladderRound, LADDER_LENGTH, rewardsFor, coreLvOf, withCoreLevels, grantCoreXP, takeSpoils, takeWholeRobot, SLOTS, partPrice, earnBolts, markSeen, buyPart, CHIP_PRICE, buyChip, takeChip, WATCH_STEP, watchTarget, watchSteps, watchRefuel } from "./meta.js?v=21";
+import { Link, makeCode } from "./net.js?v=21";
+import { sfx } from "./sfx.js?v=21";
 
 const $ = (s) => document.querySelector(s);
 const byId = (id) => DATA.robots.find((r) => r.id === id);

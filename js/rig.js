@@ -2,7 +2,7 @@
 // (cut-out puppet animation, like the Flash RPGs), then re-rasterised as crisp pixel art each
 // frame: outlined per body part and shaded with a light from the top left.
 // Facing right: +x is forward, y grows downward, the origin is the point between the feet.
-import { DATA } from "./data.js?v=20";
+import { DATA } from "./data.js?v=21";
 
 export const RW = 80, RH = 72, OX = 40, OY = 66;
 const N = RW * RH;
@@ -212,6 +212,18 @@ function ik(hx, hy, fx, fy, L1, L2, bend) {
   return [[hx + L1 * Math.cos(k), hy + L1 * Math.sin(k)], [hx + dx, hy + dy]];
 }
 
+// heel-toe foot roll: heel strikes with the toe up, the foot flattens, then the heel lifts and the toe pushes off;
+// in the swing the toe points down, then lifts again for the next strike (angles in radians, + = toe down)
+function footRoll(ph) {
+  const p = ((ph % 1) + 1) % 1, lerp = (a, b, q) => a + (b - a) * q;
+  if (p < 0.5) {
+    const q = p / 0.5;
+    return q < 0.25 ? lerp(-0.4, 0, q / 0.25) : q < 0.65 ? 0 : lerp(0, 0.6, (q - 0.65) / 0.35);
+  }
+  const q = (p - 0.5) / 0.5;
+  return lerp(0.6, -0.4, smooth(Math.min(1, q * 1.25)));
+}
+
 // walking legs: stance foot slides back on the ground, swing foot lifts in an arc
 function stride(ph, len, lift) {
   const p = ((ph % 1) + 1) % 1;
@@ -232,7 +244,7 @@ function bipedLeg(S, P, hip, which, wheels) {
     const [sx, sy] = stride(P.walk + which * 0.5, 10 * m, 3.5 * m);
     fx = restX * (1 - m) + (which ? 1 : -0.5) * m + sx;
     fy = footY + sy;
-    toe = sy < -0.5 ? 0.3 : 0;
+    toe = footRoll(P.walk + which * 0.5) * m;
   }
   if (k) { fx = fx * (1 - k) + (which ? 5 : -8) * k; toe = toe * (1 - k) + (which ? 0 : 0.9) * k; }
   const hx = hip[0] + (which ? 1.5 : -1.5), hy = hip[1] + 1.5;
@@ -321,19 +333,20 @@ function thruster(S, P, hip) {
 // ---------------------------------------------------------------- heads
 function head(S, P, HF) {
   const st = S.head.style, kind = S.head.kind;
+  const OF = frame(HF.x, HF.y, HF.a + (P.orn || 0), HF.k); // ornaments trail the head a little (follow-through)
   // ornaments behind the helmet first
   if (st === "pincer") {
-    poly(HF, [[-1, -4], [-3, -4.5], [-6, -10], [-9, -12.5], [-7, -13.5], [-4, -11], [-1, -8]], "a", 2);
-    poly(HF, [[1, -4], [3, -4.5], [6, -10], [9.5, -12.5], [7.5, -14], [4, -11.5], [1, -8]], "a");
+    poly(OF, [[-1, -4], [-3, -4.5], [-6, -10], [-9, -12.5], [-7, -13.5], [-4, -11], [-1, -8]], "a", 2);
+    poly(OF, [[1, -4], [3, -4.5], [6, -10], [9.5, -12.5], [7.5, -14], [4, -11.5], [1, -8]], "a");
   } else if (st === "ears") {
-    poly(HF, [[-5, -4], [-1.5, -4], [-3, -12.5], [-5.5, -11]], "a", 2);
-    poly(HF, [[0, -4], [4, -4], [3, -13], [0.5, -11.5]], "a");
-    poly(HF, [[1, -5], [3, -5], [2.5, -10.5], [1.2, -9.5]], "m", 1);
+    poly(OF, [[-5, -4], [-1.5, -4], [-3, -12.5], [-5.5, -11]], "a", 2);
+    poly(OF, [[0, -4], [4, -4], [3, -13], [0.5, -11.5]], "a");
+    poly(OF, [[1, -5], [3, -5], [2.5, -10.5], [1.2, -9.5]], "m", 1);
   } else if (st === "antenna") {
-    capsule(HF, -2, -4, -5, -12, 0.7, 0.7, "g");
-    capsule(HF, 2, -4, 4, -13, 0.7, 0.7, "g");
-    ellipse(HF, -5, -12.5, 1.5, 1.5, 0, "e");
-    ellipse(HF, 4, -13.5, 1.5, 1.5, 0, "e");
+    capsule(OF, -2, -4, -5, -12, 0.7, 0.7, "g");
+    capsule(OF, 2, -4, 4, -13, 0.7, 0.7, "g");
+    ellipse(OF, -5, -12.5, 1.5, 1.5, 0, "e");
+    ellipse(OF, 4, -13.5, 1.5, 1.5, 0, "e");
   }
   if (kind === "missile") {
     box(HF, -5.5, -5.5, 6, 6, -0.2, "a", { round: true });
@@ -348,10 +361,10 @@ function head(S, P, HF) {
   if (st === "dome" || st === "crest") ellipse(HF, 0, 0, 7.6, 6.6, 0, "m");
   else box(HF, 0, 0.4, 14.5, 11.5, 0, "m", { round: true });
   if (st === "dome") box(HF, -1.5, -6.6, 4.5, 2, 0, "a", { round: true });
-  if (st === "crest") for (const [x, h] of [[-4, 9], [-1, 11.5], [2, 9.5]]) poly(HF, [[x - 2, -4], [x + 2, -4], [x + 0.5, -h]], "a");
+  if (st === "crest") for (const [x, h] of [[-4, 9], [-1, 11.5], [2, 9.5]]) poly(OF, [[x - 2, -4], [x + 2, -4], [x + 0.5, -h]], "a");
   if (st === "horn") {
-    poly(HF, [[0.5, -4.5], [4.5, -5], [8, -12], [9.5, -16], [7, -15], [2.5, -9]], "a");
-    poly(HF, [[3, -6], [5, -6.2], [7.5, -11.5], [6, -11]], "a", 0);
+    poly(OF, [[0.5, -4.5], [4.5, -5], [8, -12], [9.5, -16], [7, -15], [2.5, -9]], "a");
+    poly(OF, [[3, -6], [5, -6.2], [7.5, -11.5], [6, -11]], "a", 0);
   }
   // face: visor plate, eyes, jaw
   box(HF, 3.6, 0.6, 7.4, 6.4, 0, "d", { round: true });
@@ -445,11 +458,13 @@ export function drawRobot(build, P = {}, opts = {}) {
   const hip = [0, -(HIP[body] + hover) + (P.drop || 0) + bob + kneelDrop];
   const lean = (P.lean || 0) + (body === "flyer" ? 0.12 * (P.move || 0) : 0);
   const TF = frame(hip[0], hip[1], lean);
-  const neck = at(TF, 1, -15);
+  const br = P.breath || 0;
+  const neck = at(TF, 1, -15 - br * 0.8);
   const HF0 = frame(neck[0] + (P.headX || 0), neck[1] + (P.headY || 0), lean + (P.headA || 0));
   const hc = at(HF0, 1.5, -8.3);
   const HF = frame(hc[0], hc[1], HF0.a, 1.2); // chibi: big heads
   const shR = at(TF, 4.5, -12.5), shL = at(TF, -4.5, -12.5);
+  shR[1] -= br; shL[1] -= br;
   shR[0] += P.rx || 0; shR[1] += P.ry || 0; shL[0] += P.lx || 0; shL[1] += P.ly || 0;
   const rs = (P.rs ?? REST.rs) + lean, re = rs + (P.re ?? REST.re);
   const ls = (P.ls ?? REST.ls) + lean, le = ls + (P.le ?? REST.le);

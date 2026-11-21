@@ -20,6 +20,7 @@ An 8-bit robot battler you play in the browser. Snap on parts, charge your core,
 - **Animation**: robots are jointed puppets, redrawn as pixel art every frame. Each leg type moves its own way: walking legs step, treads roll, spider legs scuttle, wings flap over a jet, roller legs skate, fish tails swish. Guns are carried low and raised to fire with recoil. Melee robots wind up, dash over, swing and hop back. Hits knock robots back, misses become dodges, broken arms fall off, and a KO sends the head flying.
 - **Music**: three original chiptune songs (menus, battle, boss) on GBA-style voices: square lead, arpeggio, triangle bass and noise drums.
 - **Friendly UI**: new players are pointed to Arcade, the move list says what each move does, a message tells you who is waiting for an order, phones get big tap targets, and the online lobby has Copy and Cancel.
+- **Smooth motion** (lessons from the SpriteCast animation plugin): heel-to-toe foot rolls while walking, a seamless 4-second idle with two breaths and a weight shift, springy follow-through on arms and head (antennae, ears and horns lag behind), weapon swing trails, level eyes while the body rocks, and stronger ground shadows.
 - **Different parts look different**: every arm carries its own weapon (blaster, twin gun, rifle, cannon, beam emitter, fist, blade, claw, drill, hammer or shield), and every head has its own crest plus a gadget for its move.
 
 ## How a battle works

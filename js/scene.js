@@ -1,8 +1,8 @@
 // Canvas battle scene at GBA resolution (240x160), drawn with pixel sprites and effects.
-import { drawText, textWidth } from "./pixel.js?v=20";
-import { drawRobot, pieceOf, weaponOf, THRUST, RW, RH, OX, OY } from "./rig.js?v=20";
-import { PARTS } from "./engine.js?v=20";
-import { sfx } from "./sfx.js?v=20";
+import { drawText, textWidth } from "./pixel.js?v=21";
+import { drawRobot, pieceOf, weaponOf, THRUST, RW, RH, OX, OY } from "./rig.js?v=21";
+import { PARTS } from "./engine.js?v=21";
+import { sfx } from "./sfx.js?v=21";
 
 export const W = 240, H = 160;
 const LANE_Y = [113, 80, 147];          // feet y for unit idx 0 (leader, middle), 1 (back), 2 (front)
@@ -337,7 +337,7 @@ export class Scene {
     for (const u of units) {
       const [x, y] = this.unitXY(u), lp = this.v(u).lastP;
       const air = Math.min(4, Math.max(0, -((lp && lp.y) || 0) / 2) + (u.body === "flyer" ? 2 : u.body === "swimmer" ? 1 : 0));
-      g.fillStyle = "rgba(0,0,0,.35)";
+      g.fillStyle = "rgba(0,0,0,.5)";
       g.fillRect(Math.round(x - 11 + air), Math.round(y), Math.round(22 - air * 2), 2);
       g.fillRect(Math.round(x - 8 + air), Math.round(y) + 2, Math.round(16 - air * 2), 1);
     }
@@ -401,10 +401,19 @@ export class Scene {
     const back = (this.col(u.side) === 0 ? -1 : 1) * (fr ? 1 : -1); // "toward my own side", in my facing frame
 
     // idle: breathing, arms sway, head follows a beat later
-    O.drop += (0.5 + 0.5 * Math.sin(t * 0.075)) * (1 - m);
-    O.rs += 0.07 * Math.sin(t * 0.075 + 1);
-    O.ls += 0.07 * Math.sin(t * 0.075 + 2);
-    O.headA += 0.05 * Math.sin(t * 0.075 - 0.9) + 0.04 * Math.sin(ph * 4 * Math.PI) * m;
+    // idle: a seamless 4 s loop - two breaths, the weight moving from foot to foot (a dip as it arrives),
+    // the body tipping one way and the head and arms balancing it (SpriteCast's idle recipe)
+    const idleP = (t + u.idx * 37 + u.side * 91) / 240 * Math.PI * 2, still = 1 - m;
+    const breath = (0.5 - 0.5 * Math.cos(idleP * 2)) * still;
+    const shift = Math.sin(idleP) * still;
+    O.drop += (0.45 + 0.35 * (0.5 - 0.5 * Math.cos(idleP * 2))) * still;
+    O.lean += 0.025 * shift;
+    O.headA += -0.03 * shift + 0.03 * Math.sin(idleP - 0.9) * still + 0.04 * Math.sin(ph * 4 * Math.PI) * m;
+    O.rs += 0.05 * Math.sin(idleP * 2 + 1) * still - 0.03 * shift;
+    O.ls += 0.05 * Math.sin(idleP * 2 + 2) * still + 0.03 * shift;
+    O.breath = breath;
+    // walking: the eyes stay level while the body rocks
+    O.headA -= 0.45 * T.lean * m;
     // walking: arms swing against the legs
     const sw = Math.sin(ph * 2 * Math.PI) * m * (SWING[u.body] ?? 1);
     O.rs += 0.5 * sw; O.ls -= 0.5 * sw; T.re -= 0.3 * m; T.le -= 0.3 * m;
@@ -513,15 +522,45 @@ export class Scene {
     // landing from the intro drop
     if (v.landT > 0) { const q = v.landT / 8; O.sy *= 1 - 0.16 * q; O.sx *= 1 + 0.12 * q; if (this.adv) v.landT--; }
 
-    const cur = v.cur || (v.cur = { ...T });
-    for (const key in T) cur[key] = snap[key] ? T[key] : cur[key] + (T[key] - cur[key]) * (run ? 0.28 : 0);
+    // eased with a slightly underdamped spring, so arms and head overshoot and settle (follow-through)
+    const cur = v.cur || (v.cur = { ...T }), vel = v.vel || (v.vel = {});
+    for (const key in T) {
+      if (snap[key]) { cur[key] = T[key]; vel[key] = 0; continue; }
+      if (!run) continue;
+      vel[key] = ((vel[key] || 0) + (T[key] - cur[key]) * 0.11) * 0.68;
+      cur[key] += vel[key];
+    }
+    cur.kneel = Math.max(0, Math.min(1, cur.kneel)); cur.claw = Math.max(0, Math.min(1, cur.claw));
+    // ornaments (antennae, ears, horns) lag behind the head's turning
+    const headNow = cur.headA + O.headA + cur.lean + O.lean;
+    const prevHead = v.prevHead === undefined ? headNow : v.prevHead;
+    v.prevHead = headNow;
+    v.orn = ((v.orn || 0) + (-(headNow - prevHead) * 6 - (v.orn || 0)) * 0.3);
     const hide = { head: !!v.apart, rarm: !!(v.apart || (v.lost && v.lost.rarm)), larm: !!(v.apart || (v.lost && v.lost.larm)) };
     return {
       t, walk: ph, move: m, x: O.x, y: O.y, sx: O.sx, sy: O.sy,
       drop: cur.drop + O.drop, lean: cur.lean + O.lean, headA: cur.headA + O.headA,
       rs: cur.rs + O.rs, re: cur.re + O.re, ls: cur.ls + O.ls, le: cur.le + O.le,
+      breath: (O.breath || 0) * 0.9, orn: Math.max(-0.5, Math.min(0.5, v.orn || 0)),
       rx: O.rx, ry: O.ry, lx: O.lx, ly: O.ly, kneel: cur.kneel, claw: cur.claw, spin: O.spin, glow, hide,
     };
+  }
+
+  // a swing leaves a fading streak behind the weapon tip (SpriteCast's "trail"), tinted by the robot's eye colour
+  swingTrail(g, u, v, anc, x, y, fr) {
+    const k = v.dash ? v.dash.t : -1, tip = v.dash ? anc[v.dash.arm === "l" ? "larm" : "rarm"] : null;
+    const tr = v.trail || (v.trail = []);
+    if (tip && k >= 11 && k <= 21 && this.adv) tr.push({ x: x + (fr ? 1 : -1) * (tip[0] - OX), y: y + (tip[1] - OY), a: 1 });
+    for (let i = tr.length - 1; i >= 0; i--) { tr[i].a -= this.adv ? 0.14 : 0; if (tr[i].a <= 0) tr.splice(i, 1); }
+    if (tr.length < 2) return;
+    g.save();
+    for (let i = 1; i < tr.length; i++) {
+      const A = tr[i - 1], B = tr[i], w = Math.max(1, Math.round(4 * B.a));
+      g.globalAlpha = Math.max(0, B.a) * 0.9;
+      g.strokeStyle = B.a > 0.6 ? "#ffffff" : u.colors.eye || "#fff3a0"; g.lineWidth = w;
+      g.beginPath(); g.moveTo(Math.round(A.x), Math.round(A.y)); g.lineTo(Math.round(B.x), Math.round(B.y)); g.stroke();
+    }
+    g.restore();
   }
 
   drawUnit(g, u) {
@@ -548,6 +587,7 @@ export class Scene {
     if (!v.cv) { v.cv = document.createElement("canvas"); v.cv.width = RW; v.cv.height = RH; }
     const res = drawRobot(u.build, P, { broken, flashPart, core: u.core && u.core.color, canvas: v.cv });
     v.anc = res.anchors; v.fr = fr; v.lastP = P;
+    this.swingTrail(g, u, v, res.anchors, x, y, fr);
     if (v.top0 === undefined) v.top0 = res.anchors.top[1] - OY;
     const top = y - OY + this.dropOffset(u, x, y);
     g.save();
